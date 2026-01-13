@@ -1,0 +1,33 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libgomp1 \
+    libgl1 \
+    libglib2.0-0 \
+    libxml2-dev \
+    libxslt1-dev \
+    zlib1g-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+COPY rag/requirements.txt /app/requirements.txt
+
+RUN pip install --no-cache-dir "numpy<2.0.0" && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip check && \
+    pip cache purge
+
+COPY rag /app/rag
+
+RUN mkdir -p /storage/uploads && \
+    chmod -R 755 /storage
+
+EXPOSE 8001
+
+CMD ["python", "-m", "uvicorn", "rag.api:app", "--host", "0.0.0.0", "--port", "8001"]

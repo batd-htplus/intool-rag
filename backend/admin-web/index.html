@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Admin - Document Management</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #007bff; margin-bottom: 10px; }
+        .nav { display: flex; gap: 10px; margin-top: 15px; }
+        .nav a { padding: 8px 16px; background: #007bff; color: white; text-decoration: none; border-radius: 4px; }
+        .nav a:hover { background: #0056b3; }
+        .nav a.active { background: #0056b3; }
+        .content { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="file"], input[type="text"], select { 
+            width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; 
+        }
+        button { 
+            padding: 12px 24px; background: #007bff; color: white; 
+            border: none; border-radius: 4px; cursor: pointer; font-weight: bold;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .result { margin-top: 20px; padding: 15px; border-radius: 4px; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; font-weight: bold; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .badge.completed { background: #d4edda; color: #155724; }
+        .badge.processing { background: #fff3cd; color: #856404; }
+        .badge.failed { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📚 RAG Document Management</h1>
+            <div class="nav">
+                <a href="/admin" id="nav-upload">Upload</a>
+                <a href="/admin/documents" id="nav-documents">Documents</a>
+                <a href="/admin/models" id="nav-models">Models</a>
+            </div>
+        </header>
+        
+        <div class="content" id="content"></div>
+    </div>
+    
+    <script>
+        const path = window.location.pathname;
+        
+        document.querySelectorAll('.nav a').forEach(a => {
+            a.classList.remove('active');
+            if (a.getAttribute('href') === path || (path === '/admin' && a.getAttribute('href') === '/admin')) {
+                a.classList.add('active');
+            }
+        });
+        
+        if (path === '/admin' || path === '/admin/') {
+            loadUploadPage();
+        } else if (path === '/admin/documents') {
+            loadDocumentsPage();
+        } else if (path === '/admin/models') {
+            loadModelsPage();
+        }
+        
+        function loadUploadPage() {
+            document.getElementById('content').innerHTML = `
+                <h2>Upload Document</h2>
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="file">Select File:</label>
+                        <input type="file" id="file" name="file" required accept=".pdf,.docx,.xlsx,.txt,.pptx">
+                        <small style="color: #666;">Supported: PDF, DOCX, XLSX, TXT, PPTX</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="project">Project Name:</label>
+                        <input type="text" id="project" name="project" required placeholder="e.g., my-project">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="language">Language:</label>
+                        <select id="language" name="language">
+                            <option value="en">English</option>
+                            <option value="vi">Vietnamese</option>
+                            <option value="ja">Japanese</option>
+                            <option value="zh">Chinese</option>
+                        </select>
+                    </div>
+                    
+                    <button type="submit">Upload & Create Embeddings</button>
+                </form>
+                <div id="result"></div>
+            `;
+            
+            document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const resultDiv = document.getElementById('result');
+                const submitBtn = e.target.querySelector('button[type="submit"]');
+                
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Uploading...';
+                
+                resultDiv.innerHTML = '<div class="result info">📤 Uploading file and creating embeddings...<br><small>This may take a few moments...</small></div>';
+                
+                try {
+                    const response = await fetch('/v1/ingest/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        const docId = data.id;
+                        let attempts = 0;
+                        const maxAttempts = 60;
+                        
+                        const checkStatus = async () => {
+                            try {
+                                const statusResponse = await fetch(`/v1/ingest/status/${docId}`);
+                                const statusData = await statusResponse.json();
+                                
+                                if (statusData.status === 'completed') {
+                                    resultDiv.innerHTML = `
+                                        <div class="result success">
+                                            <h3>✅ RAG Processing Complete!</h3>
+                                            <p><strong>Document ID:</strong> ${docId}</p>
+                                            <p><strong>Filename:</strong> ${statusData.filename}</p>
+                                            <p><strong>Project:</strong> ${statusData.project}</p>
+                                            <p><strong>Chunks Created:</strong> ${statusData.chunks_created || 0}</p>
+                                            <p><strong>Status:</strong> ${statusData.status}</p>
+                                            <p><small>✅ File uploaded → ✅ Text extracted → ✅ Chunks created → ✅ Embeddings generated → ✅ Saved to vector DB</small></p>
+                                        </div>
+                                    `;
+                                    e.target.reset();
+                                } else if (statusData.status === 'failed') {
+                                    resultDiv.innerHTML = `<div class="result error"><h3>❌ Processing Failed</h3><p>${statusData.error || 'Unknown error'}</p></div>`;
+                                } else if (attempts < maxAttempts) {
+                                    resultDiv.innerHTML = `<div class="result info">📤 Processing... (${attempts}s)<br><small>Creating embeddings and saving to vector database...</small></div>`;
+                                    attempts++;
+                                    setTimeout(checkStatus, 1000);
+                                    return;
+                                } else {
+                                    resultDiv.innerHTML = `<div class="result error"><h3>⏱️ Timeout</h3><p>Processing is taking longer than expected. Check status later.</p></div>`;
+                                }
+                            } catch (err) {
+                                resultDiv.innerHTML = `<div class="result error"><h3>❌ Error</h3><p>${err.message}</p></div>`;
+                            }
+                        };
+                        
+                        setTimeout(checkStatus, 2000);
+                    } else {
+                        resultDiv.innerHTML = `<div class="result error"><h3>❌ Error</h3><p>${data.detail || data.error || 'Upload failed'}</p></div>`;
+                    }
+                } catch (error) {
+                    resultDiv.innerHTML = `<div class="result error"><h3>❌ Error</h3><p>${error.message}</p></div>`;
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Upload & Create Embeddings';
+                }
+            });
+        }
+        
+        async function loadDocumentsPage() {
+            const content = document.getElementById('content');
+            content.innerHTML = '<p>Loading documents...</p>';
+            
+            try {
+                const response = await fetch('/v1/documents/');
+                const data = await response.json();
+                
+                if (data.documents && data.documents.length > 0) {
+                    content.innerHTML = `
+                        <h2>Documents (${data.total})</h2>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Filename</th>
+                                    <th>Project</th>
+                                    <th>Language</th>
+                                    <th>Status</th>
+                                    <th>Chunks</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.documents.map(doc => `
+                                    <tr>
+                                        <td><small>${doc.id.substring(0, 8)}...</small></td>
+                                        <td>${doc.filename}</td>
+                                        <td>${doc.project}</td>
+                                        <td>${doc.language}</td>
+                                        <td><span class="badge ${doc.status}">${doc.status}</span></td>
+                                        <td>${doc.chunks_created || 0}</td>
+                                        <td><small>${new Date(doc.created_at).toLocaleString()}</small></td>
+                                        <td>
+                                            <button onclick="deleteDocument('${doc.id}')" style="background: #dc3545; padding: 4px 8px; font-size: 12px;">Delete</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                } else {
+                    content.innerHTML = '<p>No documents found. <a href="/admin">Upload a document</a></p>';
+                }
+            } catch (error) {
+                content.innerHTML = `<div class="result error">Error loading documents: ${error.message}</div>`;
+            }
+        }
+        
+        async function deleteDocument(docId) {
+            if (!confirm('Are you sure you want to delete this document?')) return;
+            
+            try {
+                const response = await fetch(`/v1/documents/${docId}`, { method: 'DELETE' });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    alert('Document deleted successfully');
+                    loadDocumentsPage();
+                } else {
+                    alert('Error: ' + (data.detail || 'Failed to delete'));
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        async function loadModelsPage() {
+            const content = document.getElementById('content');
+            content.innerHTML = '<p>Loading model configuration...</p>';
+            
+            try {
+                const response = await fetch('/v1/config/model');
+                const config = await response.json();
+                
+                content.innerHTML = `
+                    <h2>Model Configuration</h2>
+                    <form id="modelForm">
+                        <h3>Embedding Model</h3>
+                        <div class="form-group">
+                            <label for="embedding_model">Model Name:</label>
+                            <input type="text" id="embedding_model" name="embedding_model" value="${config.embedding_model || ''}" placeholder="BAAI/bge-m3">
+                            <small style="color: #666;">Hugging Face model ID or local path</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="embedding_device">Device:</label>
+                            <select id="embedding_device" name="embedding_device">
+                                <option value="cpu" ${config.embedding_device === 'cpu' ? 'selected' : ''}>CPU</option>
+                                <option value="cuda" ${config.embedding_device === 'cuda' ? 'selected' : ''}>CUDA (GPU)</option>
+                            </select>
+                        </div>
+                        
+                        <h3>LLM Model</h3>
+                        <div class="form-group">
+                            <label for="llm_model">Model Name:</label>
+                            <input type="text" id="llm_model" name="llm_model" value="${config.llm_model || ''}" placeholder="Qwen/Qwen2.5-7B-Instruct">
+                            <small style="color: #666;">Hugging Face model ID or local path</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="llm_device">Device:</label>
+                            <select id="llm_device" name="llm_device">
+                                <option value="cpu" ${config.llm_device === 'cpu' ? 'selected' : ''}>CPU</option>
+                                <option value="cuda" ${config.llm_device === 'cuda' ? 'selected' : ''}>CUDA (GPU)</option>
+                            </select>
+                        </div>
+                        
+                        <h3>Generation Parameters</h3>
+                        <div class="form-group">
+                            <label for="temperature">Temperature (0.0-2.0):</label>
+                            <input type="number" id="temperature" name="temperature" value="${config.temperature || 0.7}" min="0" max="2" step="0.1">
+                            <small style="color: #666;">Higher = more creative, Lower = more focused</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="max_tokens">Max Tokens:</label>
+                            <input type="number" id="max_tokens" name="max_tokens" value="${config.max_tokens || 1024}" min="1" max="4096">
+                            <small style="color: #666;">Maximum length of generated response</small>
+                        </div>
+                        
+                        <h3>Chunking Parameters</h3>
+                        <div class="form-group">
+                            <label for="chunk_size">Chunk Size:</label>
+                            <input type="number" id="chunk_size" name="chunk_size" value="${config.chunk_size || 512}" min="64" max="2048">
+                            <small style="color: #666;">Size of text chunks for embedding</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="chunk_overlap">Chunk Overlap:</label>
+                            <input type="number" id="chunk_overlap" name="chunk_overlap" value="${config.chunk_overlap || 50}" min="0" max="256">
+                            <small style="color: #666;">Overlap between chunks to preserve context</small>
+                        </div>
+                        
+                        <h3>Retrieval Parameters</h3>
+                        <div class="form-group">
+                            <label for="retrieval_top_k">Top K Results:</label>
+                            <input type="number" id="retrieval_top_k" name="retrieval_top_k" value="${config.retrieval_top_k || 5}" min="1" max="20">
+                            <small style="color: #666;">Number of relevant chunks to retrieve</small>
+                        </div>
+                        
+                        <button type="submit">💾 Save Configuration</button>
+                    </form>
+                    <div id="modelResult"></div>
+                `;
+                
+                document.getElementById('modelForm').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.target);
+                    const resultDiv = document.getElementById('modelResult');
+                    const submitBtn = e.target.querySelector('button[type="submit"]');
+                    
+                    const configData = {
+                        embedding_model: formData.get('embedding_model'),
+                        llm_model: formData.get('llm_model'),
+                        embedding_device: formData.get('embedding_device'),
+                        llm_device: formData.get('llm_device'),
+                        temperature: parseFloat(formData.get('temperature')),
+                        max_tokens: parseInt(formData.get('max_tokens')),
+                        chunk_size: parseInt(formData.get('chunk_size')),
+                        chunk_overlap: parseInt(formData.get('chunk_overlap')),
+                        retrieval_top_k: parseInt(formData.get('retrieval_top_k')),
+                    };
+                    
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = 'Saving...';
+                    
+                    try {
+                        const response = await fetch('/v1/config/model', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(configData)
+                        });
+                        const data = await response.json();
+                        
+                        if (response.ok) {
+                            resultDiv.innerHTML = `<div class="result success"><h3>✅ Configuration Saved!</h3><p>Changes will take effect on next model load.</p></div>`;
+                        } else {
+                            resultDiv.innerHTML = `<div class="result error"><h3>❌ Error</h3><p>${data.detail || 'Failed to save'}</p></div>`;
+                        }
+                    } catch (error) {
+                        resultDiv.innerHTML = `<div class="result error"><h3>❌ Error</h3><p>${error.message}</p></div>`;
+                    } finally {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = '💾 Save Configuration';
+                    }
+                });
+            } catch (error) {
+                content.innerHTML = `<div class="result error">Error loading configuration: ${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>
+

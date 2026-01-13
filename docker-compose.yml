@@ -1,0 +1,132 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.8.0
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    environment:
+      QDRANT_API_KEY: ""
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - rag_network
+    healthcheck:
+      test: ["CMD", "timeout", "1", "bash", "-c", "echo > /dev/tcp/localhost/6333"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+  backend:
+    build:
+      context: ./backend
+      dockerfile: app/Dockerfile
+    container_name: rag-backend
+    ports:
+      - "8000:8000"
+    environment:
+      RAG_SERVICE_URL: "http://rag-service:8001"
+      AUTH_ENABLED: "false"
+      LOG_LEVEL: "INFO"
+      DEBUG: "false"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - rag_network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  model-service:
+    build:
+      context: ./
+      dockerfile: model-service/Dockerfile.model
+    container_name: model-service
+    ports:
+      - "8002:8002"
+    environment:
+      EMBEDDING_MODEL: "BAAI/bge-m3"
+      EMBEDDING_DEVICE: "cpu"  # Use "cuda" for GPU
+      LLM_MODEL: "Qwen/Qwen2.5-7B-Instruct"
+      LLM_DEVICE: "cpu"        # Use "cuda" for GPU
+      LLM_TEMPERATURE: "0.3"
+      LLM_MAX_TOKENS: "1024"
+      EMBEDDING_BATCH_SIZE: "32"
+      USE_OLLAMA: "${USE_OLLAMA:-false}"
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+      OLLAMA_MODEL: "qwen2.5:7b"
+      LOG_LEVEL: "INFO"
+    volumes:
+      - ./models:/app/models
+      - model_cache:/app/.cache/huggingface
+    networks:
+      - rag_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s  # Give models time to load
+
+  rag-service:
+    build:
+      context: ./
+      dockerfile: rag/Dockerfile.rag
+    container_name: rag-service
+    ports:
+      - "8001:8001"
+    environment:
+      MODEL_SERVICE_URL: "http://model-service:8002"
+      QDRANT_URL: "http://qdrant:6333"
+      LOG_LEVEL: "INFO"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      model-service:
+        condition: service_healthy
+    volumes:
+      - ./rag:/app/rag
+      - ./storages:/storage
+    networks:
+      - rag_network
+    command: python -m uvicorn rag.api:app --host 0.0.0.0 --port 8001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  webui:
+    image: ghcr.io/open-webui/open-webui:latest
+    container_name: open-webui
+    ports:
+      - "3000:8080"
+    environment:
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+      OPENAI_API_BASE_URL: "http://backend:8000/v1"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+    depends_on:
+      - backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - webui_data:/app/backend/data
+    networks:
+      - rag_network
+
+networks:
+  rag_network:
+    driver: bridge
+
+volumes:
+  qdrant_storage:
+  webui_data:
+  model_cache:

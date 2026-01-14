@@ -5,8 +5,7 @@ from .main import RapidOCR
 from .utils import LoadImageError, VisRes
 from .utils.typings import EngineType, LangCls, LangDet, LangRec, ModelType, OCRVersion
 
-# Export wrapper functions for backward compatibility
-from .rapidocr import extract_text_from_page, is_available, get_status
+from .pdf_ocr import extract_text_from_page, is_available, get_status
 
 __all__ = [
     'RapidOCR',

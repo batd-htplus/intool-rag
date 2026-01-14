@@ -3,16 +3,8 @@ from rag.query.retriever import retrieve
 from rag.query.prompt import build_prompt, build_chat_prompt, format_context_with_metadata
 from rag.config import config
 from rag.logging import logger
-
-_llm = None
-
-def get_llm():
-    """Get LLM instance (lazy loaded, singleton)"""
-    global _llm
-    if _llm is None:
-        from rag.llm.http_client import HTTPLLM
-        _llm = HTTPLLM()
-    return _llm
+from rag.core.container import get_container
+from rag.core.exceptions import LLMError
 
 class QueryEngine:
     """RAG query engine"""
@@ -21,7 +13,6 @@ class QueryEngine:
         """Filter results by relevance score threshold"""
         threshold = threshold or config.LLM_RELEVANCE_THRESHOLD
         filtered = [r for r in results if r.score >= threshold]
-        logger.info(f"Filtered {len(results)} results to {len(filtered)} (threshold: {threshold})")
         return filtered
     
     async def query(
@@ -35,36 +26,43 @@ class QueryEngine:
     ) -> Dict[str, Any]:
         """
         Execute RAG query:
-        1. Retrieve relevant documents
+        1. Retrieve relevant documents (with hybrid search)
         2. Filter by relevance threshold
         3. Build prompt with context
         4. Generate answer
         Returns answer with optional sources
         """
         try:
-            logger.info(f"Query: {question}")
-            
             results = await retrieve(question, filters)
             filtered_results = self._filter_by_relevance(results)
             
             if not filtered_results:
-                return {
-                    "answer": "I don't have relevant information to answer this question.",
-                    "sources": [],
-                    "relevance_threshold": config.LLM_RELEVANCE_THRESHOLD
-                }
-            
-            context = format_context_with_metadata(filtered_results)
-            
-            if chat_history:
-                prompt = build_chat_prompt(context, chat_history, question)
+                context = ""
+                if chat_history:
+                    prompt = build_chat_prompt(context, chat_history, question)
+                else:
+                    prompt = f"""Answer the following question. If you don't know the answer, you can say so.
+
+QUESTION: {question}
+
+ANSWER:"""
             else:
-                prompt = build_prompt(context, question)
+                context = format_context_with_metadata(filtered_results, max_results=5)
+                
+                if chat_history:
+                    prompt = build_chat_prompt(context, chat_history, question)
+                else:
+                    prompt = build_prompt(context, question)
             
-            llm = get_llm()
-            answer = llm.generate(prompt, temperature, max_tokens)
-            
-            logger.info(f"Answer: {answer[:100]}...")
+            llm = get_container().get_llm_provider()
+            try:
+                answer = await llm.generate(prompt, temperature, max_tokens)
+            except RuntimeError as e:
+                logger.error(f"LLM generation failed: {str(e)}")
+                raise LLMError(str(e))
+            except Exception as e:
+                logger.error(f"LLM generation failed: {str(e)}")
+                raise LLMError(f"Failed to generate answer: {str(e)}")
             
             response = {"answer": answer}
             
@@ -93,25 +91,34 @@ class QueryEngine:
     ) -> AsyncIterator[str]:
         """Stream RAG query response"""
         try:
-            logger.info(f"Stream query: {question}")
-            
             results = await retrieve(question, filters)
             filtered_results = self._filter_by_relevance(results)
             
             if not filtered_results:
-                yield "I don't have relevant information to answer this question."
-                return
-            
-            context = format_context_with_metadata(filtered_results)
-            
-            if chat_history:
-                prompt = build_chat_prompt(context, chat_history, question)
+                context = ""
+                if chat_history:
+                    prompt = build_chat_prompt(context, chat_history, question)
+                else:
+                    prompt = f"""Answer the following question. If you don't know the answer, you can say so.
+
+QUESTION: {question}
+
+ANSWER:"""
             else:
-                prompt = build_prompt(context, question)
+                context = format_context_with_metadata(filtered_results, max_results=5)
+                
+                if chat_history:
+                    prompt = build_chat_prompt(context, chat_history, question)
+                else:
+                    prompt = build_prompt(context, question)
             
-            llm = get_llm()
-            async for chunk in llm.generate_stream(prompt, temperature, max_tokens):
-                yield chunk
+            llm = get_container().get_llm_provider()
+            try:
+                async for chunk in llm.generate_stream(prompt, temperature, max_tokens):
+                    yield chunk
+            except Exception as e:
+                logger.error(f"LLM stream generation failed: {str(e)}")
+                raise LLMError(f"Failed to stream answer: {str(e)}")
         except Exception as e:
             logger.error(f"Stream query error: {str(e)}")
             raise

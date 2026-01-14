@@ -17,6 +17,20 @@ services:
       timeout: 3s
       retries: 3
       start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
   backend:
     build:
       context: ./backend
@@ -31,17 +45,34 @@ services:
       DEBUG: "false"
     depends_on:
       qdrant:
-        condition: service_healthy
+        condition: service_started
+      rag-service:
+        condition: service_started
     volumes:
       - ./backend:/app
     networks:
       - rag_network
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level warning
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   model-service:
     build:
@@ -51,20 +82,31 @@ services:
     ports:
       - "8002:8002"
     environment:
+      # Embedding
       EMBEDDING_MODEL: "BAAI/bge-m3"
-      EMBEDDING_DEVICE: "cpu"  # Use "cuda" for GPU
-      LLM_MODEL: "Qwen/Qwen2.5-7B-Instruct"
-      LLM_DEVICE: "cpu"        # Use "cuda" for GPU
-      LLM_TEMPERATURE: "0.3"
-      LLM_MAX_TOKENS: "1024"
-      EMBEDDING_BATCH_SIZE: "32"
-      USE_OLLAMA: "${USE_OLLAMA:-false}"
+      EMBEDDING_DEVICE: "cpu"
+      EMBEDDING_BATCH_SIZE: "16"
+      
+      # LLM Backend (ollama or huggingface)
+      LLM_BACKEND: "ollama"
+      LLM_MODEL: "phi3:mini"
+      
+      # Ollama settings (if LLM_BACKEND=ollama)
       OLLAMA_BASE_URL: "http://host.docker.internal:11434"
-      OLLAMA_MODEL: "qwen2.5:7b"
+      
+      # HuggingFace settings (if LLM_BACKEND=huggingface)
+      LLM_DEVICE: "cpu"
+      MODELS_DIR: "./models"
+      
+      # Generation params
+      LLM_TEMPERATURE: "0.3"
+      LLM_MAX_TOKENS: "512"
+      
       LOG_LEVEL: "INFO"
     volumes:
       - ./models:/app/models
       - model_cache:/app/.cache/huggingface
+      - ./model-service:/app/model_service
     networks:
       - rag_network
     extra_hosts:
@@ -74,8 +116,21 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 120s  # Give models time to load
-
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 16G
+        reservations:
+          cpus: '2.0'
+          memory: 8G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
   rag-service:
     build:
       context: ./
@@ -89,20 +144,35 @@ services:
       LOG_LEVEL: "INFO"
     depends_on:
       qdrant:
-        condition: service_healthy
+        condition: service_started
       model-service:
-        condition: service_healthy
+        condition: service_started
     volumes:
       - ./rag:/app/rag
       - ./storages:/storage
     networks:
       - rag_network
-    command: python -m uvicorn rag.api:app --host 0.0.0.0 --port 8001
+    command: sh -c "sleep 5 && python -m uvicorn rag.api:app --host 0.0.0.0 --port 8001 --log-level warning"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   webui:
     image: ghcr.io/open-webui/open-webui:latest
@@ -114,7 +184,8 @@ services:
       OPENAI_API_BASE_URL: "http://backend:8000/v1"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
     depends_on:
-      - backend
+      backend:
+        condition: service_started
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

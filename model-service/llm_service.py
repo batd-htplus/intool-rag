@@ -1,27 +1,30 @@
 """
-LLM wrapper for model service
+LLM service wrapper - provides singleton LLM instance.
+
+Core application gets LLM through this service.
+Actual adapter selection is handled by factory (model-service/llm/factory.py).
 """
-import os
 from model_service.logging import logger
+from model_service.llm.factory import get_llm as create_llm
 
 _llm = None
 
 def get_llm():
-    """Get LLM instance (lazy loaded, singleton)"""
+    """
+    Get LLM instance (lazy loaded, singleton).
+    
+    Returns:
+        BaseLLM instance (adapter chosen by factory)
+        
+    Raises:
+        RuntimeError: If LLM initialization fails
+    """
     global _llm
     if _llm is None:
         try:
-            if os.getenv("USE_OLLAMA", "false").lower() == "true":
-                from model_service.llm.ollama import OllamaLLM
-                logger.info("Loading Ollama LLM...")
-                _llm = OllamaLLM()
-            else:
-                from model_service.llm.qwen import QwenLLM
-                logger.info("Loading Qwen LLM...")
-                _llm = QwenLLM()
-            logger.info("LLM loaded successfully")
+            _llm = create_llm()
         except Exception as e:
-            logger.error(f"Failed to load LLM: {e}", exc_info=True)
+            logger.error(f"Failed to initialize LLM: {e}", exc_info=True)
             raise
     return _llm
 

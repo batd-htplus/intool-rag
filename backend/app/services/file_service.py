@@ -23,7 +23,6 @@ class FileService:
             async with aiofiles.open(filepath, 'wb') as f:
                 await f.write(content)
             
-            logger.info(f"File saved: {filepath}")
             return filepath
         except Exception as e:
             logger.error(f"File save error: {str(e)}")
@@ -35,7 +34,6 @@ class FileService:
         try:
             if os.path.exists(filepath):
                 os.remove(filepath)
-                logger.info(f"File deleted: {filepath}")
         except Exception as e:
             logger.error(f"File cleanup error: {str(e)}")
 

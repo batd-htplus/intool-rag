@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 class Message(BaseModel):
     role: str
@@ -11,8 +11,18 @@ class ChatChoice(BaseModel):
     finish_reason: Optional[str] = None
 
 class ChatRequest(BaseModel):
-    question: str
-    project: str
+    model: str = "AI-HTPv.10"
+    messages: List[Message]
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = None
+    stream: Optional[bool] = False
+    project: Optional[str] = None
+    filters: Optional[Dict[str, Any]] = None
 
 class ChatResponse(BaseModel):
-    answer: str
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    choices: List[ChatChoice]
+    usage: Dict[str, int]

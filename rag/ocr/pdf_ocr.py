@@ -1,5 +1,5 @@
 """
-Wrapper for RapidOCR module integration
+PDF OCR wrapper - extracts text from PDF pages using OCR engine
 """
 from typing import Optional, Any
 from rag.logging import logger
@@ -14,8 +14,8 @@ except ImportError:
 
 fitz: Optional[Any] = None
 HAS_PYMUPDF: bool = False
-HAS_RAPIDOCR: bool = False
-_rapidocr_engine: Optional[Any] = None
+HAS_OCR_ENGINE: bool = False
+_ocr_engine: Optional[Any] = None
 
 try:
     import fitz
@@ -24,26 +24,24 @@ except ImportError:
     pass
 
 try:
-    from rag.ocr import RapidOCR
-    HAS_RAPIDOCR = True
+    from rag.ocr.main import RapidOCR
+    HAS_OCR_ENGINE = True
 except ImportError as e:
-    logger.warning(f"[OCR] Failed to import RapidOCR: {e}")
-    HAS_RAPIDOCR = False
+    logger.warning(f"[OCR] Failed to import OCR engine: {e}")
+    HAS_OCR_ENGINE = False
 except Exception as e:
-    logger.warning(f"[OCR] RapidOCR initialization error: {e}")
-    HAS_RAPIDOCR = False
+    logger.warning(f"[OCR] OCR engine initialization error: {e}")
+    HAS_OCR_ENGINE = False
 
 
-def _get_rapidocr_engine():
-    """Get or create RapidOCR engine instance (singleton)"""
-    global _rapidocr_engine
-    if _rapidocr_engine is None and HAS_RAPIDOCR:
+def _get_ocr_engine():
+    """Get or create OCR engine instance (singleton)"""
+    global _ocr_engine
+    if _ocr_engine is None and HAS_OCR_ENGINE:
         try:
             from pathlib import Path
             ocr_root = Path(__file__).resolve().parent
             models_dir = ocr_root / "models"
-            
-            logger.info(f"[OCR] Initializing RapidOCR engine with models from: {models_dir}")
             
             params = {
                 "Det.model_path": str(models_dir / "ch_PP-OCRv5_mobile_det.onnx"),
@@ -51,17 +49,16 @@ def _get_rapidocr_engine():
                 "Rec.model_path": str(models_dir / "ch_PP-OCRv5_rec_mobile_infer.onnx"),
             }
             
-            _rapidocr_engine = RapidOCR(params=params)
-            logger.info("[OCR] RapidOCR engine initialized successfully")
+            _ocr_engine = RapidOCR(params=params)
         except Exception as e:
-            logger.error(f"[OCR] Failed to initialize RapidOCR engine: {e}", exc_info=True)
-            _rapidocr_engine = None
-    return _rapidocr_engine
+            logger.error(f"[OCR] Failed to initialize OCR engine: {e}", exc_info=True)
+            _ocr_engine = None
+    return _ocr_engine
 
 
 def extract_text_from_page(page: Any) -> str:
     """
-    Extract text from PDF page using RapidOCR
+    Extract text from PDF page using OCR engine
     
     Args:
         page: PyMuPDF page object
@@ -69,8 +66,8 @@ def extract_text_from_page(page: Any) -> str:
     Returns:
         Extracted text string
     """
-    if not HAS_RAPIDOCR:
-        logger.warning("[OCR] RapidOCR not available")
+    if not HAS_OCR_ENGINE:
+        logger.warning("[OCR] OCR engine not available")
         return ""
 
     if not HAS_PYMUPDF:
@@ -98,9 +95,9 @@ def extract_text_from_page(page: Any) -> str:
         # Direct conversion to numpy array (avoid intermediate copy)
         img_array = np.array(img, dtype=np.uint8)
 
-        ocr_engine = _get_rapidocr_engine()
+        ocr_engine = _get_ocr_engine()
         if ocr_engine is None:
-            logger.error("[OCR] RapidOCR engine is None, cannot extract text.")
+            logger.error("[OCR] OCR engine is None, cannot extract text.")
             return ""
 
         result = ocr_engine(img_array)
@@ -111,13 +108,13 @@ def extract_text_from_page(page: Any) -> str:
         
         return ""
     except Exception as e:
-        logger.error(f"RapidOCR extraction failed: {e}", exc_info=True)
+        logger.error(f"OCR extraction failed: {e}", exc_info=True)
         return ""
 
 
 def is_available() -> bool:
     """Check if OCR is available"""
-    return HAS_PYMUPDF and HAS_RAPIDOCR and _get_rapidocr_engine() is not None
+    return HAS_PYMUPDF and HAS_OCR_ENGINE and _get_ocr_engine() is not None
 
 
 def get_status() -> dict:
@@ -125,7 +122,7 @@ def get_status() -> dict:
     return {
         "available": is_available(),
         "has_pymupdf": HAS_PYMUPDF,
-        "has_rapidocr": HAS_RAPIDOCR,
-        "engine_initialized": _rapidocr_engine is not None
+        "has_ocr_engine": HAS_OCR_ENGINE,
+        "engine_initialized": _ocr_engine is not None
     }
 

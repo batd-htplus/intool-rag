@@ -25,8 +25,14 @@ RUN pip install --no-cache-dir "numpy<2.0.0" && \
 
 COPY rag /app/rag
 
-RUN mkdir -p /storage/uploads && \
-    chmod -R 755 /storage
+RUN groupadd -r raguser && useradd -r -g raguser -m -d /home/raguser raguser && \
+    mkdir -p /storage/uploads /home/raguser/.cache && \
+    chown -R raguser:raguser /app /storage /home/raguser && \
+    chmod -R 755 /storage /home/raguser/.cache
+
+ENV HOME=/home/raguser
+
+USER raguser
 
 EXPOSE 8001
 

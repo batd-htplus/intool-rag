@@ -1,7 +1,6 @@
 from typing import List, Optional, Any
 from rag.logging import logger
 
-# Import PyMuPDF for PDF processing
 fitz: Optional[Any] = None
 HAS_PYMUPDF: bool = False
 
@@ -11,12 +10,11 @@ try:
 except ImportError:
     pass
 
-# Import OCR module (cached for performance)
 _ocr_status_cache: Optional[dict] = None
 _ocr_available_cache: Optional[bool] = None
 
 try:
-    from rag.ocr.rapidocr import extract_text_from_page, is_available as ocr_is_available, get_status as ocr_get_status
+    from rag.ocr.pdf_ocr import extract_text_from_page, is_available as ocr_is_available, get_status as ocr_get_status
     HAS_OCR = True
 except ImportError:
     HAS_OCR = False
@@ -45,7 +43,6 @@ def load_pdf(filepath: str) -> List[Document]:
 
     if HAS_PYMUPDF:
         try:
-            logger.info(f"[PDF] Extracting with PyMuPDF: {filepath}")
             doc = fitz.open(filepath)
 
             for index, page in enumerate(doc):
@@ -71,8 +68,6 @@ def load_pdf(filepath: str) -> List[Document]:
 
     try:
         import PyPDF2
-        logger.info("[PDF] Extracting with PyPDF2")
-
         with open(filepath, "rb") as file:
             reader = PyPDF2.PdfReader(file)
 
@@ -97,8 +92,6 @@ def load_pdf(filepath: str) -> List[Document]:
 
     try:
         import pdfplumber
-        logger.info("[PDF] Extracting with pdfplumber")
-
         with pdfplumber.open(filepath) as pdf:
             for index, page in enumerate(pdf.pages):
                 text = page.extract_text() or ""
@@ -124,20 +117,14 @@ def load_pdf(filepath: str) -> List[Document]:
     if _ocr_status_cache is None:
         _ocr_status_cache = ocr_get_status()
         _ocr_available_cache = ocr_is_available()
-        logger.info(f"[PDF] OCR check - {_ocr_status_cache}")
     
     if HAS_PYMUPDF and _ocr_available_cache:
-        logger.warning("[PDF] No text found, attempting OCR with RapidOCR")
-
         try:
             doc = fitz.open(filepath)
-            logger.info(f"[PDF] Opened PDF with {len(doc)} pages for OCR")
-
             for index, page in enumerate(doc):
                 try:
                     ocr_text = extract_text_from_page(page)
                     if ocr_text.strip():
-                        logger.info(f"[PDF] OCR extracted {len(ocr_text)} chars from page {index + 1}")
                         documents.append(
                             _make_document(
                                 ocr_text,
@@ -147,25 +134,20 @@ def load_pdf(filepath: str) -> List[Document]:
                                 extractor="rapidocr"
                             )
                         )
-                    else:
-                        logger.debug(f"[PDF] OCR returned empty text for page {index + 1}")
-                except Exception as page_error:
-                    logger.warning(f"[PDF] OCR failed for page {index + 1}: {page_error}")
+                except Exception:
+                    pass
 
             doc.close()
 
             if documents:
-                logger.info(f"[PDF] OCR successfully extracted {len(documents)} pages")
                 return documents
-            else:
-                logger.warning("[PDF] OCR completed but no text extracted from any page")
         except Exception as ocr_error:
             logger.error(f"[PDF] OCR process failed: {ocr_error}", exc_info=True)
 
     if not HAS_PYMUPDF:
         logger.error("[PDF] OCR unavailable: PyMuPDF not installed or failed to import")
     if not _ocr_available_cache:
-        logger.error("[PDF] OCR unavailable: RapidOCR not installed or failed to import")
+        logger.error("[PDF] OCR unavailable: OCR engine not installed or failed to import")
         logger.error("[PDF] Install dependencies: opencv-python, omegaconf, onnxruntime")
 
     raise ValueError(f"Cannot extract text from PDF: {filepath}")
@@ -287,7 +269,6 @@ def load_txt(filepath: str) -> List[Document]:
 
 def load(filepath: str) -> List[Document]:
     extension = filepath.lower().rsplit(".", 1)[-1]
-    logger.info(f"[Loader] Loading file: {filepath}")
     
     if extension == "pdf":
         return load_pdf(filepath)

@@ -1,9 +1,12 @@
 import torch
+import logging
 from typing import List
 from sentence_transformers import SentenceTransformer
 from pathlib import Path
 from model_service.config import config
 from model_service.logging import logger
+
+logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
 
 class BGEEmbedding:
     """BGE-M3 embedding model for multi-lingual text"""
@@ -20,20 +23,14 @@ class BGEEmbedding:
         local_model_path = models_dir / model_name
         
         if local_model_path.exists():
-            logger.info(f"Found local model at {local_model_path}, loading from local...")
             model_path = str(local_model_path)
         else:
-            logger.info(f"No local model found, downloading from Hugging Face: {config.EMBEDDING_MODEL}")
             model_path = config.EMBEDDING_MODEL
-        
-        logger.info(f"Loading embedding model on {self.device}")
         
         self.model = SentenceTransformer(
             model_path,
             device=self.device
         )
-        
-        logger.info(f"Embedding model loaded: {model_path}")
     
     def embed(self, texts: List[str], instruction: str = None) -> List[List[float]]:
         """
@@ -51,12 +48,10 @@ class BGEEmbedding:
             embeddings = self.model.encode(
                 texts,
                 batch_size=config.EMBEDDING_BATCH_SIZE,
-                convert_to_tensor=True,
-                show_progress_bar=True
+                convert_to_tensor=False,
+                show_progress_bar=False,
+                normalize_embeddings=True
             )
-            
-            if isinstance(embeddings, torch.Tensor):
-                embeddings = embeddings.cpu().numpy().tolist()
             
             return embeddings
         except Exception as e:
@@ -74,8 +69,10 @@ class BGEEmbedding:
         if instruction:
             text = f"{instruction}{text}"
         
-        embedding = self.model.encode(text, convert_to_tensor=True)
-        if isinstance(embedding, torch.Tensor):
-            embedding = embedding.cpu().numpy().tolist()
-        return embedding
+        embedding = self.model.encode(
+            text,
+            convert_to_tensor=False,
+            normalize_embeddings=True
+        )
+        return embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)
 

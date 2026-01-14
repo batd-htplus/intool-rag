@@ -15,7 +15,7 @@ class Settings(BaseModel):
 
     QDRANT_URL: str = os.getenv("QDRANT_URL", "http://qdrant:6333")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "Phi3:mini")
 
 
 settings = Settings()

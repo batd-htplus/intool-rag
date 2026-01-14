@@ -1,8 +1,9 @@
 # Core ML/AI (install in order for compatibility)
 numpy<2.0.0
-torch==2.1.0
-transformers==4.35.0
-sentence-transformers==2.2.2
+torch>=2.2.0
+transformers>=4.37.0
+sentence-transformers>=2.5.0
+huggingface_hub>=0.20.0
 
 # Web framework
 fastapi==0.104.1

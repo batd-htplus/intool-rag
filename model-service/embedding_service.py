@@ -13,9 +13,7 @@ def get_embedding_model():
     if _embedding_model is None:
         try:
             from model_service.embedding.bge_m3 import BGEEmbedding
-            logger.info("Loading embedding model...")
             _embedding_model = BGEEmbedding()
-            logger.info("Embedding model loaded successfully")
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}", exc_info=True)
             raise

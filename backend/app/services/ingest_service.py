@@ -42,8 +42,6 @@ class IngestService:
             document_store[doc_id]["chunks_created"] = result.get("chunks_created", 0)
             document_store[doc_id]["completed_at"] = datetime.utcnow().isoformat()
             
-            logger.info(f"Document {doc_id} ingestion completed")
-            
             file_service.cleanup_file(filepath)
             
         except Exception as e:
@@ -105,7 +103,6 @@ class IngestService:
         
         del document_store[doc_id]
         
-        logger.info(f"Document {doc_id} deleted with {deleted_count} vectors")
         return deleted_count
     
     async def reprocess_document(self, doc_id: str) -> str:

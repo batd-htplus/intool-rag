@@ -8,7 +8,8 @@ class RAGService:
     
     def __init__(self):
         self.base_url = settings.RAG_SERVICE_URL
-        self.timeout = 300
+        self.timeout = 120
+        self.stream_timeout = 180
     
     async def query(
         self,
@@ -57,7 +58,7 @@ class RAGService:
     ) -> AsyncIterator[str]:
         """Stream response from RAG service"""
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.stream_timeout) as client:
                 payload = {
                     "question": question,
                     "filters": filters or {},

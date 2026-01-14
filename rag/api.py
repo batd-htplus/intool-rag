@@ -1,10 +1,15 @@
 from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from rag.index import engine
 from rag.ingest.pipeline import pipeline
 from rag.config import config
 from rag.logging import logger
+from rag.background_tasks import startup_background_tasks, shutdown_background_tasks
+from rag.cache import get_embedding_cache, get_query_cache
+from rag.core.container import get_container, shutdown_container
+from rag.core.exceptions import RAGError, EmbeddingError, LLMError, RetrievalError
 import time
 import uuid
 import os
@@ -14,8 +19,8 @@ from typing import Optional, Dict, Any
 
 app = FastAPI(
     title="RAG Service",
-    version="0.1.0",
-    description="RAG Query & Ingest Service"
+    version="0.2.0",
+    description="Optimized RAG Query & Ingest Service with Hybrid Search and Semantic Chunking"
 )
 
 # CORS middleware
@@ -29,11 +34,35 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("RAG Service starting...")
+    """Initialize all services and DI container"""
+    try:
+        container = get_container()
+        container.get_embedding_provider()
+        container.get_llm_provider()
+        if config.RERANKER_ENABLED:
+            container.get_reranker_provider()
+    except Exception as e:
+        logger.error(f"Failed to initialize providers: {str(e)}")
+        raise
+    
+    await startup_background_tasks()
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    logger.info("RAG Service stopping...")
+    """Cleanup all resources"""
+    try:
+        await shutdown_background_tasks()
+        await shutdown_container()
+    except Exception as e:
+        logger.error(f"Error during shutdown: {str(e)}")
+
+class QueryRequest(BaseModel):
+    question: str
+    filters: Optional[Dict[str, Any]] = None
+    temperature: float = 0.7
+    max_tokens: Optional[int] = None
+    stream: bool = False
+    include_sources: bool = True
 
 @app.get("/health")
 async def health():
@@ -53,35 +82,50 @@ async def readiness():
     }
 
 @app.post("/query")
-async def query(
-    question: str,
-    filters: Optional[Dict[str, Any]] = None,
-    temperature: float = 0.7,
-    max_tokens: Optional[int] = None,
-    stream: bool = False,
-    include_sources: bool = True,
-):
+async def query(request: QueryRequest):
     """
     Query the RAG engine with optional source tracking.
+    
+    Uses DI container for:
+    - Shared HTTP client (connection pooling)
+    - Query result caching
+    - Hybrid search (vector + BM25)
+    - Optional reranking
+    
+    Error Handling:
+    - EmbeddingError: Failed to embed question
+    - RetrievalError: Failed to retrieve documents
+    - LLMError: Failed to generate answer
     """
     try:
-        if stream:
+        if request.stream:
             async def generate():
-                async for chunk in engine.query_stream(
-                    question=question,
-                    filters=filters,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                ):
-                    yield chunk
+                try:
+                    async for chunk in engine.query_stream(
+                        question=request.question,
+                        filters=request.filters,
+                        temperature=request.temperature,
+                        max_tokens=request.max_tokens,
+                    ):
+                        yield chunk
+                except EmbeddingError as e:
+                    logger.error(f"Embedding error: {str(e)}")
+                    yield f"ERROR: Failed to embed question: {str(e)}"
+                except RetrievalError as e:
+                    logger.error(f"Retrieval error: {str(e)}")
+                    yield f"ERROR: Failed to retrieve documents: {str(e)}"
+                except LLMError as e:
+                    logger.error(f"LLM error: {str(e)}")
+                    yield f"ERROR: Failed to generate answer: {str(e)}"
+            
             return StreamingResponse(generate(), media_type="text/event-stream")
 
         result = await engine.query(
-            question=question,
-            filters=filters,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            include_sources=include_sources,
+            question=request.question,
+            filters=request.filters,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            include_sources=request.include_sources,
         )
         
         return {
@@ -90,17 +134,38 @@ async def query(
             "query_id": str(uuid.uuid4()),
             "timestamp": int(time.time()),
         }
+    except EmbeddingError as e:
+        logger.error(f"Embedding error: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"Embedding service error: {str(e)}")
+    except RetrievalError as e:
+        logger.error(f"Retrieval error: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"Retrieval error: {str(e)}")
+    except LLMError as e:
+        logger.error(f"LLM error: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"LLM service error: {str(e)}")
+    except RAGError as e:
+        logger.error(f"RAG error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Query error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Unexpected query error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/ingest")
 async def ingest(
     file: UploadFile = File(...),
     project: str = Form(...),
     language: str = Form("en"),
+    async_mode: bool = Form(False, description="Process in background"),
 ):
-    """Upload and ingest a document"""
+    """
+    Upload and ingest a document.
+    
+    Args:
+        file: Document file
+        project: Project identifier
+        language: Document language
+        async_mode: If True, process in background; if False, process synchronously
+    """
     try:
         upload_dir = Path("/storage/uploads")
         upload_dir.mkdir(parents=True, exist_ok=True)
@@ -111,24 +176,31 @@ async def ingest(
             content = await file.read()
             await f.write(content)
         
-        logger.info(f"File saved: {file_path}")
         
         result = await pipeline.ingest_document(
             filepath=str(file_path),
             project=project,
             language=language,
+            async_mode=async_mode
         )
         
-        try:
-            if file_path.exists():
-                os.remove(file_path)
-        except OSError as e:
-            logger.warning(f"Could not remove temporary file {file_path}: {e}")
+        if not async_mode:
+            try:
+                if file_path.exists():
+                    os.remove(file_path)
+            except OSError as e:
+                logger.warning(f"Could not remove temporary file {file_path}: {e}")
         
         return result
+    except EmbeddingError as e:
+        logger.error(f"Embedding error during ingestion: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"Embedding service error: {str(e)}")
+    except RAGError as e:
+        logger.error(f"RAG error during ingestion: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Ingest error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Unexpected ingest error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.delete("/vectors/{doc_id}")
 async def delete_vectors(doc_id: str):
@@ -147,17 +219,27 @@ async def delete_vectors(doc_id: str):
 
 @app.get("/config")
 async def get_config():
-    """Get current configuration"""
+    """Get current configuration including optimization settings"""
     return {
         "embedding_model": config.EMBEDDING_MODEL,
         "llm_model": config.LLM_MODEL,
+        "reranker_model": config.RERANKER_MODEL,
         "embedding_device": config.EMBEDDING_DEVICE,
         "llm_device": config.LLM_DEVICE,
         "temperature": config.LLM_TEMPERATURE,
         "max_tokens": config.LLM_MAX_TOKENS,
         "chunk_size": config.CHUNK_SIZE,
         "chunk_overlap": config.CHUNK_OVERLAP,
+        "semantic_chunking": config.SEMANTIC_CHUNKING,
         "retrieval_top_k": config.RETRIEVAL_TOP_K,
+        "hybrid_search_enabled": config.HYBRID_SEARCH_ENABLED,
+        "reranker_enabled": config.RERANKER_ENABLED,
+        "cache_embeddings": config.CACHE_EMBEDDINGS,
+        "bm25_weight": config.BM25_WEIGHT,
+        "vector_weight": config.VECTOR_WEIGHT,
+        "qdrant_hnsw_m": config.QDRANT_HNSW_M,
+        "qdrant_hnsw_ef_construct": config.QDRANT_HNSW_EF_CONSTRUCT,
+        "qdrant_hnsw_ef_search": config.QDRANT_HNSW_EF_SEARCH,
     }
 
 @app.put("/config")
@@ -177,6 +259,10 @@ async def update_config(
             if config.LLM_MODEL != new_config["llm_model"]:
                 model_changed = True
             config.LLM_MODEL = new_config["llm_model"]
+        if "reranker_model" in new_config:
+            config.RERANKER_MODEL = new_config["reranker_model"]
+        
+        # Device settings
         if "embedding_device" in new_config:
             if config.EMBEDDING_DEVICE != new_config["embedding_device"]:
                 model_changed = True
@@ -185,78 +271,78 @@ async def update_config(
             if config.LLM_DEVICE != new_config["llm_device"]:
                 model_changed = True
             config.LLM_DEVICE = new_config["llm_device"]
+        
+        # Generation parameters
         if "temperature" in new_config:
             config.LLM_TEMPERATURE = float(new_config["temperature"])
         if "max_tokens" in new_config:
             config.LLM_MAX_TOKENS = int(new_config["max_tokens"])
+        
+        # Chunking strategy
         if "chunk_size" in new_config:
             config.CHUNK_SIZE = int(new_config["chunk_size"])
         if "chunk_overlap" in new_config:
             config.CHUNK_OVERLAP = int(new_config["chunk_overlap"])
+        if "semantic_chunking" in new_config:
+            config.SEMANTIC_CHUNKING = new_config["semantic_chunking"]
+        
+        # Retrieval optimization
         if "retrieval_top_k" in new_config:
             config.RETRIEVAL_TOP_K = int(new_config["retrieval_top_k"])
+        if "hybrid_search_enabled" in new_config:
+            config.HYBRID_SEARCH_ENABLED = new_config["hybrid_search_enabled"]
+        if "reranker_enabled" in new_config:
+            config.RERANKER_ENABLED = new_config["reranker_enabled"]
+        if "bm25_weight" in new_config:
+            config.BM25_WEIGHT = float(new_config["bm25_weight"])
+        if "vector_weight" in new_config:
+            config.VECTOR_WEIGHT = float(new_config["vector_weight"])
         
-        logger.info(f"Configuration updated: {new_config}")
+        # Cache settings
+        if "cache_embeddings" in new_config:
+            config.CACHE_EMBEDDINGS = new_config["cache_embeddings"]
         
-        if (model_changed or reload_models):
-            logger.info("Clearing HTTP clients to reconnect to model-service...")
+        # Qdrant HNSW tuning
+        if "qdrant_hnsw_m" in new_config:
+            config.QDRANT_HNSW_M = int(new_config["qdrant_hnsw_m"])
+        if "qdrant_hnsw_ef_construct" in new_config:
+            config.QDRANT_HNSW_EF_CONSTRUCT = int(new_config["qdrant_hnsw_ef_construct"])
+        if "qdrant_hnsw_ef_search" in new_config:
+            config.QDRANT_HNSW_EF_SEARCH = int(new_config["qdrant_hnsw_ef_search"])
+        
+        
+        if model_changed or reload_models:
             try:
-                import rag.query.retriever as retriever_module
                 import rag.index as index_module
-                
-                retriever_module._embedding_model = None
                 index_module._llm = None
-                
-                logger.info("HTTP clients cleared. They will reconnect on next use.")
             except Exception as e:
-                logger.warning(f"Could not clear clients: {str(e)}")
+                logger.warning(f"Could not clear LLM client: {str(e)}")
         
         return {
             "status": "updated",
             "models_reloaded": model_changed or reload_models,
-            "config": {
-                "embedding_model": config.EMBEDDING_MODEL,
-                "llm_model": config.LLM_MODEL,
-                "embedding_device": config.EMBEDDING_DEVICE,
-                "llm_device": config.LLM_DEVICE,
-                "temperature": config.LLM_TEMPERATURE,
-                "max_tokens": config.LLM_MAX_TOKENS,
-                "chunk_size": config.CHUNK_SIZE,
-                "chunk_overlap": config.CHUNK_OVERLAP,
-                "retrieval_top_k": config.RETRIEVAL_TOP_K,
-            }
+            "config": await get_config()
         }
     except Exception as e:
         logger.error(f"Config update error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/config/reload")
-async def reload_models():
-    """Clear HTTP clients to reconnect to model-service"""
+@app.post("/cache/clear")
+async def clear_cache(cache_type: str = Query("all", description="Cache type: embeddings, queries, or all")):
+    """Clear cache (embeddings, queries, or both)"""
     try:
-        import rag.query.retriever as retriever_module
-        import rag.index as index_module
+        if cache_type in ["embeddings", "all"]:
+            emb_cache = get_embedding_cache()
+            emb_cache.clear()
         
-        retriever_module._embedding_model = None
-        index_module._llm = None
-        
-        logger.info("HTTP clients cleared. They will reconnect to model-service on next use.")
+        if cache_type in ["queries", "all"]:
+            query_cache = get_query_cache()
+            query_cache.clear()
         
         return {
             "status": "success",
-            "message": "HTTP clients cleared. They will reconnect to model-service on next use."
+            "cleared": cache_type
         }
     except Exception as e:
-        logger.error(f"Reload error: {str(e)}")
+        logger.error(f"Cache clear error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(
-        "rag.api:app",
-        host="0.0.0.0",
-        port=8001,
-        reload=config.LOG_LEVEL == "DEBUG",
-    )

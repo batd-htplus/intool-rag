@@ -32,6 +32,28 @@ app.include_router(documents.router, prefix="/v1/documents", tags=["documents"])
 app.include_router(ingest.router, prefix="/v1/ingest", tags=["ingest"])
 app.include_router(config.router, prefix="/v1/config", tags=["config"])
 
+@app.get("/v1/models")
+async def list_models():
+    """List available models (OpenAI-compatible endpoint for Open WebUI)"""
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "AI-HTPv.10",
+                "object": "model",
+                "created": 1677610602,
+                "owned_by": "rag-service",
+                "permission": [],
+                "root": "AI-HTPv.10",
+                "parent": None
+            }
+        ]
+    }
+
+from app.api.v1.chat import chat_completions, chat_stream
+app.post("/v1/chat/completions")(chat_completions)
+app.post("/v1/chat/completions/stream")(chat_stream)
+
 @app.get("/admin")
 @app.get("/admin/")
 async def admin_index():
@@ -59,11 +81,11 @@ async def admin_models():
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info(f"Starting {settings.APP_NAME}")
+    pass
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    logger.info(f"Stopping {settings.APP_NAME}")
+    pass
 
 if __name__ == "__main__":
     import uvicorn

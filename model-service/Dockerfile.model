@@ -17,17 +17,24 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 COPY model-service/requirements.txt /app/requirements.txt
 
 RUN pip install --no-cache-dir "numpy<2.0.0" && \
-    pip install --no-cache-dir torch==2.1.0 --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt && \
     pip check && \
     pip cache purge
 
 COPY model-service /app/model_service
 
-RUN mkdir -p /app/.cache/huggingface /app/models && \
-    chmod -R 755 /app/.cache /app/models
+RUN groupadd -r modeluser && useradd -r -g modeluser -m -d /home/modeluser modeluser && \
+    mkdir -p /app/.cache/huggingface /app/models /home/modeluser/.cache && \
+    chown -R modeluser:modeluser /app /home/modeluser && \
+    chmod -R 755 /app/.cache /app/models /home/modeluser/.cache
+
+ENV HOME=/home/modeluser
+ENV HF_HOME=/app/.cache/huggingface
+
+USER modeluser
 
 EXPOSE 8002
 
-CMD ["python", "-m", "uvicorn", "model_service.api:app", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["python", "-m", "uvicorn", "model_service.api:app", "--host", "0.0.0.0", "--port", "8002", "--log-level", "warning"]
 

@@ -2,16 +2,45 @@
 Model Service API
 Serves LLM and Embedding models via HTTP API
 """
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import os
+from contextlib import asynccontextmanager
 from model_service.logging import logger
 from model_service.embedding_service import get_embedding_model
 from model_service.llm_service import get_llm
 
-app = FastAPI(title="Model Service", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup and shutdown logic"""
+    logger.info("Loading models on startup...")
+    try:
+        logger.info("Loading embedding model...")
+        embedding_model = get_embedding_model()
+        logger.info("✓ Embedding model loaded")
+    except Exception as e:
+        logger.error(f"Failed to load embedding model: {e}")
+    
+    try:
+        logger.info("Loading LLM model...")
+        llm = get_llm()
+        logger.info("✓ LLM model loaded")
+    except Exception as e:
+        logger.error(f"Failed to load LLM model: {e}")
+    
+    logger.info("✓ All models loaded and ready")
+    
+    yield  # App runs here
+    
+    # Shutdown
+    logger.info("Shutting down model service...")
+
+app = FastAPI(title="Model Service", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -115,11 +144,20 @@ async def generate(request: GenerateRequest):
         if llm is None:
             raise HTTPException(status_code=503, detail="LLM not loaded")
         
-        text = llm.generate(
-            request.prompt,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens
-        )
+        if hasattr(llm, '_generate_async'):
+            text = await llm._generate_async(
+                request.prompt,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens
+            )
+        else:
+            import asyncio
+            text = await asyncio.to_thread(
+                llm.generate,
+                request.prompt,
+                request.temperature,
+                request.max_tokens
+            )
         
         return {"text": text}
     except HTTPException:
@@ -134,7 +172,7 @@ async def get_config():
     return {
         "embedding_model": os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3"),
         "embedding_device": os.getenv("EMBEDDING_DEVICE", "cpu"),
-        "llm_model": os.getenv("LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct"),
+        "llm_model": os.getenv("LLM_MODEL", "Phi3:mini"),
         "llm_device": os.getenv("LLM_DEVICE", "cpu"),
         "use_ollama": os.getenv("USE_OLLAMA", "false").lower() == "true"
     }

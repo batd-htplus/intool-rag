@@ -2,18 +2,27 @@ from typing import List
 from rag.config import config
 from rag.logging import logger
 
-def format_context_with_metadata(results: List) -> str:
-    """Format retrieved results with metadata and relevance scores"""
+def format_context_with_metadata(results: List, max_results: int = 5) -> str:
+    """Format retrieved results with metadata and relevance scores
+    
+    Args:
+        results: List of query results
+        max_results: Maximum number of results to include (default: 5 for shorter context)
+    """
     if not results:
         return ""
     
+    limited_results = results[:max_results]
+    
     context_parts = []
-    for i, result in enumerate(results, 1):
+    for i, result in enumerate(limited_results, 1):
         score = getattr(result, 'score', 0)
         metadata = getattr(result, 'metadata', {})
         text = getattr(result, 'text', '')
         
-        # Format each source with score and metadata
+        if len(text) > 1500:
+            text = text[:1500] + "..."
+        
         source_info = f"[Source {i}, Relevance: {score:.2%}]"
         if metadata:
             doc_name = metadata.get("filename") or metadata.get("doc_name", "Unknown")
@@ -26,11 +35,14 @@ def format_context_with_metadata(results: List) -> str:
 def build_prompt(context: str, question: str) -> str:
     """Build RAG prompt from context and question"""
     
-    prompt = f"""You are a helpful AI assistant. Answer the following question ONLY based on the provided context.
+    prompt = f"""You are a helpful AI assistant. Answer the question based ONLY on the provided context.
 
-If the context does not contain information to answer the question, respond with: "I don't have this information in the provided documents."
-
-Do NOT make up information or use external knowledge. Only use the context below.
+Instructions:
+- Read the context carefully
+- Extract relevant information to answer the question
+- If the context contains the answer, provide a clear and complete answer
+- If the context does NOT contain enough information, respond with: "I don't have this information in the provided documents."
+- Answer in the same language as the question
 
 CONTEXT:
 {context}

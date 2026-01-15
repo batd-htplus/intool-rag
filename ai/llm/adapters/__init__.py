@@ -5,8 +5,8 @@ Each adapter implements BaseLLM interface and provides a unified way to interact
 with different LLM providers (Ollama, HuggingFace, etc.)
 """
 
-from model_service.llm.adapters.ollama import OllamaAdapter
-from model_service.llm.adapters.huggingface import HuggingFaceAdapter
+from ai.llm.adapters.ollama import OllamaAdapter
+from ai.llm.adapters.huggingface import HuggingFaceAdapter
 
 __all__ = [
     "OllamaAdapter",

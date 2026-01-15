@@ -74,39 +74,36 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  model-service:
+  ai-service:
     build:
       context: ./
-      dockerfile: model-service/Dockerfile.model
-    container_name: model-service
+      dockerfile: ai/Dockerfile.model
+    container_name: ai-service
     ports:
       - "8002:8002"
     environment:
-      # Embedding
       EMBEDDING_MODEL: "BAAI/bge-m3"
       EMBEDDING_DEVICE: "cpu"
       EMBEDDING_BATCH_SIZE: "16"
-      
-      # LLM Backend (ollama or huggingface)
       LLM_BACKEND: "ollama"
       LLM_MODEL: "phi3:mini"
-      
-      # Ollama settings (if LLM_BACKEND=ollama)
       OLLAMA_BASE_URL: "http://host.docker.internal:11434"
-      
-      # HuggingFace settings (if LLM_BACKEND=huggingface)
       LLM_DEVICE: "cpu"
       MODELS_DIR: "./models"
-      
-      # Generation params
       LLM_TEMPERATURE: "0.3"
       LLM_MAX_TOKENS: "512"
-      
       LOG_LEVEL: "INFO"
+      EMBED_CONCURRENCY: "2"
+      LLM_CONCURRENCY: "1"
+      THREADPOOL_MAX_WORKERS: "4"
+      EMBED_TIMEOUT: "45.0"
+      LLM_TIMEOUT: "120.0"
+      ACQUIRE_TIMEOUT: "3.0"
+      OLLAMA_TIMEOUT: "100.0"
     volumes:
       - ./models:/app/models
       - model_cache:/app/.cache/huggingface
-      - ./model-service:/app/model_service
+      - ./ai:/app/ai
     networks:
       - rag_network
     extra_hosts:
@@ -121,11 +118,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4.0'
-          memory: 16G
-        reservations:
           cpus: '2.0'
           memory: 8G
+        reservations:
+          cpus: '1.0'
+          memory: 4G
     logging:
       driver: "json-file"
       options:
@@ -139,13 +136,14 @@ services:
     ports:
       - "8001:8001"
     environment:
-      MODEL_SERVICE_URL: "http://model-service:8002"
+      MODEL_SERVICE_URL: "http://ai-service:8002"
       QDRANT_URL: "http://qdrant:6333"
+      QDRANT_API_KEY: ""
       LOG_LEVEL: "INFO"
     depends_on:
       qdrant:
         condition: service_started
-      model-service:
+      ai-service:
         condition: service_started
     volumes:
       - ./rag:/app/rag

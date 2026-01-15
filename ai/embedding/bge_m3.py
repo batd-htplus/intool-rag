@@ -3,8 +3,8 @@ import logging
 from typing import List
 from sentence_transformers import SentenceTransformer
 from pathlib import Path
-from model_service.config import config
-from model_service.logging import logger
+from ai.config import config
+from ai.logging import logger
 
 logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
 
@@ -15,7 +15,6 @@ class BGEEmbedding:
         self.device = config.EMBEDDING_DEVICE
         
         if self.device == "cuda" and not torch.cuda.is_available():
-            logger.warning("CUDA requested but not available, falling back to CPU")
             self.device = "cpu"
         
         models_dir = config.MODELS_DIR
@@ -45,15 +44,13 @@ class BGEEmbedding:
             if instruction:
                 texts = [f"{instruction}{text}" for text in texts]
             
-            embeddings = self.model.encode(
+            return self.model.encode(
                 texts,
                 batch_size=config.EMBEDDING_BATCH_SIZE,
                 convert_to_tensor=False,
                 show_progress_bar=False,
                 normalize_embeddings=True
             )
-            
-            return embeddings
         except Exception as e:
             logger.error(f"Embedding error: {str(e)}")
             raise
@@ -72,7 +69,8 @@ class BGEEmbedding:
         embedding = self.model.encode(
             text,
             convert_to_tensor=False,
-            normalize_embeddings=True
+            normalize_embeddings=True,
+            show_progress_bar=False
         )
         return embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)
 

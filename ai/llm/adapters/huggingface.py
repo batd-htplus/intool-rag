@@ -8,8 +8,8 @@ from typing import Optional, AsyncIterator
 from pathlib import Path
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from model_service.logging import logger
-from model_service.llm.base import BaseLLM
+from ai.logging import logger
+from ai.llm.base import BaseLLM
 
 
 class HuggingFaceAdapter(BaseLLM):
@@ -42,7 +42,6 @@ class HuggingFaceAdapter(BaseLLM):
             model_path = self.model_name
         
         if self.device == "cuda" and not torch.cuda.is_available():
-            logger.warning("CUDA requested but not available, falling back to CPU")
             self.device = "cpu"
         
         try:
@@ -64,7 +63,7 @@ class HuggingFaceAdapter(BaseLLM):
         
         except Exception as e:
             logger.error(f"Failed to load model: {str(e)}")
-            raise RuntimeError(f"Cannot load model {model_path}: {str(e)}")
+            raise
     
     def generate(
         self,
@@ -84,16 +83,17 @@ class HuggingFaceAdapter(BaseLLM):
                 outputs = self.model.generate(
                     **inputs,
                     max_new_tokens=max_tok,
-                    temperature=temp,
-                    top_p=0.9,
-                    do_sample=True,
+                    temperature=temp if temp > 0 else 0.01,
+                    top_p=0.95,
+                    top_k=50,
+                    do_sample=temp > 0,
+                    repetition_penalty=1.1,
                     eos_token_id=self.tokenizer.eos_token_id,
                     pad_token_id=self.tokenizer.pad_token_id
                 )
             
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             
-            # Remove prompt from response if present
             if prompt in response:
                 response = response[len(prompt):].strip()
             
@@ -101,7 +101,7 @@ class HuggingFaceAdapter(BaseLLM):
         
         except Exception as e:
             logger.error(f"HuggingFace generation error: {str(e)}")
-            raise RuntimeError(f"Failed to generate with HuggingFace: {str(e)}")
+            raise
     
     async def generate_stream(
         self,

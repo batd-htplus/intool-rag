@@ -5,8 +5,8 @@ This is the single point where adapter selection happens.
 Core application never knows which adapter is being used.
 """
 import os
-from model_service.logging import logger
-from model_service.llm.base import BaseLLM
+from ai.logging import logger
+from ai.llm.base import BaseLLM
 
 
 def get_llm() -> BaseLLM:
@@ -30,7 +30,7 @@ def get_llm() -> BaseLLM:
     
     if backend == "ollama":
         try:
-            from model_service.llm.adapters.ollama import OllamaAdapter
+            from ai.llm.adapters.ollama import OllamaAdapter
             return OllamaAdapter()
         except ImportError as e:
             raise RuntimeError(f"Failed to import OllamaAdapter: {str(e)}")
@@ -39,7 +39,7 @@ def get_llm() -> BaseLLM:
     
     elif backend == "huggingface":
         try:
-            from model_service.llm.adapters.huggingface import HuggingFaceAdapter
+            from ai.llm.adapters.huggingface import HuggingFaceAdapter
             return HuggingFaceAdapter()
         except ImportError as e:
             raise RuntimeError(f"Failed to import HuggingFaceAdapter: {str(e)}")

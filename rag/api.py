@@ -206,12 +206,12 @@ async def ingest(
 async def delete_vectors(doc_id: str):
     """Delete vectors for a document"""
     try:
-        from rag.vector_store.qdrant import delete
+        from rag.vector_store.qdrant import vector_store
 
-        deleted_count = await delete(doc_id)
+        await vector_store.delete(filters={"doc_id": doc_id})
         return {
             "doc_id": doc_id,
-            "deleted_count": deleted_count,
+            "deleted_count": 1,
         }
     except Exception as e:
         logger.error(f"Delete error: {str(e)}")

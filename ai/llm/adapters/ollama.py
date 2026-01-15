@@ -5,8 +5,8 @@ Uses Ollama API to interact with local LLM models.
 import httpx
 import os
 from typing import Optional, AsyncIterator
-from model_service.logging import logger
-from model_service.llm.base import BaseLLM
+from ai.logging import logger
+from ai.llm.base import BaseLLM
 
 
 class OllamaAdapter(BaseLLM):
@@ -24,13 +24,14 @@ class OllamaAdapter(BaseLLM):
     def __init__(self):
         """Initialize Ollama adapter"""
         self.base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        self.model_name = os.getenv("OLLAMA_MODEL", "phi3:mini")
+        self.model_name = os.getenv("LLM_MODEL", os.getenv("OLLAMA_MODEL", "phi3:mini"))
         self.temperature = float(os.getenv("LLM_TEMPERATURE", "0.3"))
         self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "512"))
+        self.timeout = float(os.getenv("OLLAMA_TIMEOUT", "150.0"))
     
     def _get_client(self):
         """Get httpx client for Ollama API"""
-        return httpx.Client(base_url=self.base_url, timeout=120.0)
+        return httpx.Client(base_url=self.base_url, timeout=self.timeout)
     
     def generate(
         self,
@@ -61,7 +62,7 @@ class OllamaAdapter(BaseLLM):
         
         except Exception as e:
             logger.error(f"Ollama generation error: {str(e)}")
-            raise RuntimeError(f"Failed to generate with Ollama: {str(e)}")
+            raise
     
     async def generate_stream(
         self,
@@ -76,7 +77,7 @@ class OllamaAdapter(BaseLLM):
             
             async with httpx.AsyncClient(
                 base_url=self.base_url, 
-                timeout=120.0
+                timeout=self.timeout
             ) as client:
                 async with client.stream(
                     "POST",
@@ -104,7 +105,7 @@ class OllamaAdapter(BaseLLM):
         
         except Exception as e:
             logger.error(f"Ollama stream error: {str(e)}")
-            raise RuntimeError(f"Failed to stream with Ollama: {str(e)}")
+            raise
     
     def is_ready(self) -> bool:
         """Check if Ollama service is ready"""

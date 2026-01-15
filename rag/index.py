@@ -47,7 +47,7 @@ QUESTION: {question}
 
 ANSWER:"""
             else:
-                context = format_context_with_metadata(filtered_results, max_results=5)
+                context = format_context_with_metadata(filtered_results, query=question)
                 
                 if chat_history:
                     prompt = build_chat_prompt(context, chat_history, question)
@@ -105,7 +105,7 @@ QUESTION: {question}
 
 ANSWER:"""
             else:
-                context = format_context_with_metadata(filtered_results, max_results=5)
+                context = format_context_with_metadata(filtered_results, query=question)
                 
                 if chat_history:
                     prompt = build_chat_prompt(context, chat_history, question)

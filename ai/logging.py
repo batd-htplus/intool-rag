@@ -1,5 +1,5 @@
 """
-Logging configuration for model service
+Logging configuration for AI service
 """
 import logging
 import os
@@ -13,5 +13,5 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
-logger = logging.getLogger("model_service")
+logger = logging.getLogger("ai_service")
 

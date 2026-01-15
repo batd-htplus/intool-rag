@@ -4,7 +4,7 @@ from pathlib import Path
 class Config:
     """RAG service configuration"""
     
-    MODEL_SERVICE_URL = os.getenv("MODEL_SERVICE_URL", "http://model-service:8002")
+    MODEL_SERVICE_URL = os.getenv("MODEL_SERVICE_URL", "http://ai-service:8002")
     
     EMBEDDING_PROVIDER_TYPE = os.getenv("EMBEDDING_PROVIDER_TYPE", "http")
     LLM_PROVIDER_TYPE = os.getenv("LLM_PROVIDER_TYPE", "http")
@@ -29,6 +29,7 @@ class Config:
     
     # Vector Store
     QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+    QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
     QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "documents")
     QDRANT_TIMEOUT = int(os.getenv("QDRANT_TIMEOUT", "30"))
     VECTOR_DIMENSION = int(os.getenv("VECTOR_DIMENSION", "1024"))
@@ -42,9 +43,11 @@ class Config:
     CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "512"))
     CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
     SEMANTIC_CHUNKING = os.getenv("SEMANTIC_CHUNKING", "false").lower() == "true"
+    MAX_CHUNK_CHAR = int(os.getenv("MAX_CHUNK_CHAR", "2000"))
     
     # Retrieval
     RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "10"))
+    RETRIEVAL_MIN_SCORE = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.3"))
     HYBRID_SEARCH_ENABLED = os.getenv("HYBRID_SEARCH_ENABLED", "true").lower() == "true"
     BM25_WEIGHT = float(os.getenv("BM25_WEIGHT", "0.3"))
     VECTOR_WEIGHT = float(os.getenv("VECTOR_WEIGHT", "0.7"))
@@ -64,11 +67,13 @@ class Config:
         "" 
     )
     
-    # Storage
     STORAGE_DIR = Path(os.getenv("STORAGE_DIR", "/storage"))
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     
-    # Logging
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+    
+    CONTEXT_MAX_RESULTS = int(os.getenv("CONTEXT_MAX_RESULTS", "3"))
+    CONTEXT_MAX_TEXT_LENGTH = int(os.getenv("CONTEXT_MAX_TEXT_LENGTH", "800"))
+    CHAT_HISTORY_MAX_MESSAGES = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "3"))
 
 config = Config()

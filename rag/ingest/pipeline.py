@@ -1,201 +1,192 @@
 import uuid
 import time
 from typing import List, Dict, Any, Optional
+
 from rag.ingest.loaders import load
-from rag.ingest.semantic_chunker import chunk
 from rag.ingest.semantic_chunker import SemanticChunker
-from rag.vector_store.qdrant import upsert
+from rag.vector_store.qdrant import vector_store
 from rag.config import config
 from rag.cache import get_embedding_cache
 from rag.core.container import get_container
 from rag.core.exceptions import IngestError, ChunkingError, EmbeddingError
 from rag.logging import logger
+from rag.query.prompt import clean_text_multilang
 
+
+# =====================================================
+# Async Ingest Pipeline (Precision-first)
+# =====================================================
 
 class AsyncIngestPipeline:
-    """Async document ingestion pipeline with batching and caching.
-    
-    Benefits:
-    - Uses DI container for shared embedding provider
-    - Connection pooling via shared HTTP client
-    - Batch embedding with caching
-    - Semantic chunking with document structure awareness
     """
-    
+    Precision-first ingestion pipeline:
+    - Clean text (JA / VI / EN)
+    - Semantic chunking with hard limits
+    - Batched embedding with cache
+    - Minimal, stable metadata
+    """
+
     def __init__(self):
         self.embedding_cache = get_embedding_cache()
         self.batch_size = config.EMBEDDING_BATCH_SIZE
-        self.semantic_chunker = SemanticChunker()
-    
+        self.chunker = SemanticChunker()
+
     def _get_embedding_provider(self):
-        """Get embedding provider from DI container (shared instance)"""
         return get_container().get_embedding_provider()
-    
+
+    # =================================================
+    # Public API
+    # =================================================
+
     async def ingest_document(
         self,
         filepath: str,
         project: str,
         language: str = "en",
         doc_id: Optional[str] = None,
-        async_mode: bool = False
+        async_mode: bool = False,
     ) -> Dict[str, Any]:
         """
-        Full pipeline with optimization:
-        1. Load document
-        2. Chunk text (semantic-aware)
-        3. Embed chunks (with batching and caching)
-        4. Upsert to vector DB
-        
-        Args:
-            filepath: Path to document
-            project: Project identifier
-            language: Document language
-            doc_id: Optional document ID
-            async_mode: If True, enqueue as background task
-        
-        Returns:
-            Dictionary with ingestion results
+        Public API used by /ingest endpoint.
+        - Keeps backward compatibility with async_mode parameter.
+        - For now we always run synchronously to keep behavior simple & predictable.
         """
-        if async_mode:
-            from rag.background_tasks import get_task_queue
-            queue = get_task_queue()
-            task_coro = self._ingest_document_impl(filepath, project, language, doc_id)
-            await queue.enqueue(task_coro)
-            
-            return {
-                "doc_id": doc_id or str(uuid.uuid4()),
-                "status": "queued",
-                "message": "Document queued for ingestion"
-            }
-        else:
-            return await self._ingest_document_impl(filepath, project, language, doc_id)
-    
-    async def _ingest_document_impl(
+        return await self._ingest_impl(filepath, project, language, doc_id)
+
+    # =================================================
+    # Core Implementation
+    # =================================================
+
+    async def _ingest_impl(
         self,
         filepath: str,
         project: str,
-        language: str = "en",
-        doc_id: Optional[str] = None
+        language: str,
+        doc_id: Optional[str]
     ) -> Dict[str, Any]:
-        """Internal implementation of document ingestion"""
         try:
-            if not doc_id:
-                doc_id = str(uuid.uuid4())
-            
+            doc_id = doc_id or str(uuid.uuid4())
             start_time = time.time()
-            
-            # Step 1: Load document
+
             documents = load(filepath)
-            
+            if not documents:
+                raise IngestError("No document content loaded")
+
             total_chunks = 0
-            
-            # Step 2-4: Process each document
+            chunk_counter = 0
+
             for doc in documents:
-                chunk_start = time.time()
-                if config.SEMANTIC_CHUNKING:
-                    chunks_with_meta = self.semantic_chunker.chunk_with_metadata(
-                        doc.text,
-                        doc_type="markdown" if hasattr(doc, 'doc_type') else "plain_text"
+                raw_text = getattr(doc, "text", "")
+                if not raw_text.strip():
+                    continue
+
+                clean_text = clean_text_multilang(raw_text)
+                if not clean_text:
+                    continue
+
+                try:
+                    chunks_with_meta = self.chunker.chunk_with_metadata(
+                        clean_text,
+                        doc_type="markdown" if getattr(doc, "doc_type", "") == "markdown" else "plain_text"
                     )
-                    chunks = [c[0] for c in chunks_with_meta]
-                    chunk_metadata = {i: c[1] for i, c in enumerate(chunks_with_meta)}
-                else:
-                    chunks = chunk(doc.text)
-                    chunk_metadata = {}
-                
+                except Exception as e:
+                    raise ChunkingError(str(e))
+
+                if not chunks_with_meta:
+                    continue
+
+                chunks = []
+                chunk_meta = []
+
+                for text, meta in chunks_with_meta:
+                    text = text.strip()
+                    if not text:
+                        continue
+                    if len(text) > config.MAX_CHUNK_CHAR:
+                        text = text[:config.MAX_CHUNK_CHAR]
+                    chunks.append(text)
+                    chunk_meta.append(meta)
+
                 if not chunks:
                     continue
-                
-                # Step 3: Batch embedding with caching
-                embeddings = await self._embed_chunks_optimized(chunks)
-                
-                # Step 4: Prepare payloads
-                texts = []
+
+                embeddings = await self._embed_chunks(chunks)
+
                 payloads = []
                 ids = []
-                
-                for i, chunk_text in enumerate(chunks):
-                    texts.append(chunk_text)
-                    
-                    payload = {
+
+                for i, text in enumerate(chunks):
+                    payloads.append({
+                        "text": text,
                         "project": project,
-                        "source": filepath.split('/')[-1],
-                        "language": language,
                         "doc_id": doc_id,
-                        "chunk_index": i,
-                        "text": chunk_text,
-                        **doc.metadata
-                    }
-                    
-                    if i in chunk_metadata:
-                        payload["chunk_meta"] = chunk_metadata[i]
-                    
-                    payloads.append(payload)
+                        "source": filepath.split("/")[-1],
+                        "language": language,
+                        "chunk_index": chunk_counter,
+                        "chunk_meta": chunk_meta[i],
+                    })
                     ids.append(str(uuid.uuid4()))
-                
-                await upsert(embeddings, payloads, ids)
-                
+                    chunk_counter += 1
+
+                await vector_store.upsert(ids, embeddings, payloads)
                 total_chunks += len(chunks)
-            
-            total_time = time.time() - start_time
-            
+
             return {
                 "doc_id": doc_id,
                 "chunks_created": total_chunks,
                 "status": "completed",
-                "duration_seconds": total_time
+                "duration_seconds": round(time.time() - start_time, 3),
             }
-        
+
+        except (ChunkingError, EmbeddingError):
+            raise
         except Exception as e:
-            logger.error(f"Ingestion error: {str(e)}")
-            if isinstance(e, (ChunkingError, EmbeddingError)):
-                raise
-            raise IngestError(f"Document ingestion failed: {str(e)}")
-    
-    async def _embed_chunks_optimized(self, chunks: List[str]) -> List[List[float]]:
-        """
-        Embed chunks with caching and batching.
-        
-        - Checks cache for already-embedded chunks
-        - Batches remaining chunks for efficient embedding
-        - Caches new embeddings
-        """
-        embeddings_result = [None] * len(chunks)
-        
-        # Step 1: Check cache for existing embeddings
+            raise IngestError(str(e))
+
+    # =================================================
+    # Embedding with Cache
+    # =================================================
+
+    async def _embed_chunks(self, chunks: List[str]) -> List[List[float]]:
+        results = [None] * len(chunks)
+        instruction = config.EMBEDDING_PASSAGE_INSTRUCTION or ""
+
         if config.CACHE_EMBEDDINGS:
-            cached = self.embedding_cache.batch_get(chunks, config.EMBEDDING_MODEL)
-            for idx, embedding in cached.items():
-                embeddings_result[idx] = embedding
-            
-            uncached_indices = [i for i in range(len(chunks)) if embeddings_result[i] is None]
-            uncached_chunks = [chunks[i] for i in uncached_indices]
-        else:
-            uncached_indices = list(range(len(chunks)))
-            uncached_chunks = chunks
-        
-        if not uncached_chunks:
-            return embeddings_result
-        
-        # Step 2: Embed uncached chunks in batches
+            cached = self.embedding_cache.batch_get(
+                chunks,
+                config.EMBEDDING_MODEL,
+                instruction=instruction
+            )
+            for idx, emb in cached.items():
+                results[idx] = emb
+
+        uncached_idx = [i for i, r in enumerate(results) if r is None]
+        if not uncached_idx:
+            return results
+
+        uncached_chunks = [chunks[i] for i in uncached_idx]
+
         try:
             provider = self._get_embedding_provider()
-            uncached_embeddings = await provider.embed_batch(
+            new_embeddings = await provider.embed_batch(
                 uncached_chunks,
-                instruction=config.EMBEDDING_PASSAGE_INSTRUCTION or None,
+                instruction=instruction or None,
                 batch_size=self.batch_size
             )
         except Exception as e:
-            logger.error(f"Failed to embed chunks: {str(e)}", exc_info=True)
-            raise EmbeddingError(f"Batch embedding failed: {str(e)}")
-        
-        # Step 3: Cache new embeddings and merge results
-        for idx, embedding in zip(uncached_indices, uncached_embeddings):
-            embeddings_result[idx] = embedding
+            raise EmbeddingError(str(e))
+
+        for i, emb in zip(uncached_idx, new_embeddings):
+            results[i] = emb
             if config.CACHE_EMBEDDINGS:
-                self.embedding_cache.set(chunks[idx], embedding, config.EMBEDDING_MODEL)
-        
-        return embeddings_result
+                self.embedding_cache.set(
+                    chunks[i],
+                    emb,
+                    config.EMBEDDING_MODEL,
+                    instruction=instruction
+                )
+
+        return results
 
 
 pipeline = AsyncIngestPipeline()

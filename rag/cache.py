@@ -20,18 +20,22 @@ class EmbeddingCache:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.enabled = config.CACHE_EMBEDDINGS
     
-    def _get_content_hash(self, text: str, model: str = "") -> str:
-        """Generate hash of text content for caching"""
-        combined = f"{model}:{text}"
+    def _get_content_hash(self, text: str, model: str = "", instruction: str = "") -> str:
+        """Generate hash of text content + instruction for caching
+        
+        CRITICAL: Instruction must be included because same text with different
+        instructions produces different embeddings (query vs passage)
+        """
+        combined = f"{model}:{instruction}:{text}"
         return hashlib.md5(combined.encode()).hexdigest()
     
-    def get(self, text: str, model: str = "") -> Optional[List[float]]:
-        """Get cached embedding if exists"""
+    def get(self, text: str, model: str = "", instruction: str = "") -> Optional[List[float]]:
+        """Get cached embedding if exists (with instruction-aware key)"""
         if not self.enabled:
             return None
         
         try:
-            hash_key = self._get_content_hash(text, model)
+            hash_key = self._get_content_hash(text, model, instruction)
             cache_file = self.cache_dir / f"{hash_key}.pkl"
             
             if cache_file.exists():
@@ -43,13 +47,13 @@ class EmbeddingCache:
         
         return None
     
-    def set(self, text: str, embedding: List[float], model: str = ""):
-        """Cache an embedding"""
+    def set(self, text: str, embedding: List[float], model: str = "", instruction: str = ""):
+        """Cache an embedding (with instruction-aware key)"""
         if not self.enabled:
             return
         
         try:
-            hash_key = self._get_content_hash(text, model)
+            hash_key = self._get_content_hash(text, model, instruction)
             cache_file = self.cache_dir / f"{hash_key}.pkl"
             
             with open(cache_file, 'wb') as f:
@@ -57,21 +61,21 @@ class EmbeddingCache:
         except Exception as e:
             logger.warning(f"Cache write error: {str(e)}")
     
-    def batch_get(self, texts: List[str], model: str = "") -> Dict[int, List[float]]:
-        """Get cached embeddings for a batch, returns dict mapping index to embedding"""
+    def batch_get(self, texts: List[str], model: str = "", instruction: str = "") -> Dict[int, List[float]]:
+        """Get cached embeddings for a batch (with instruction-aware key)"""
         cached = {}
         
         for idx, text in enumerate(texts):
-            embedding = self.get(text, model)
+            embedding = self.get(text, model, instruction)
             if embedding:
                 cached[idx] = embedding
         
         return cached
     
-    def batch_set(self, texts: List[str], embeddings: List[List[float]], model: str = ""):
-        """Cache a batch of embeddings"""
+    def batch_set(self, texts: List[str], embeddings: List[List[float]], model: str = "", instruction: str = ""):
+        """Cache a batch of embeddings (with instruction-aware key)"""
         for text, embedding in zip(texts, embeddings):
-            self.set(text, embedding, model)
+            self.set(text, embedding, model, instruction)
     
     def clear(self):
         """Clear all cached embeddings"""

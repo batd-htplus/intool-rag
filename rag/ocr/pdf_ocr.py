@@ -58,13 +58,14 @@ def _get_ocr_engine():
 
 def extract_text_from_page(page: Any) -> str:
     """
-    Extract text from PDF page using OCR engine
+    Extract text from PDF page using OCR engine with layout preservation.
+    Uses box coordinates to maintain table structure and key-value pairs.
     
     Args:
         page: PyMuPDF page object
         
     Returns:
-        Extracted text string
+        Extracted text string with preserved layout structure
     """
     if not HAS_OCR_ENGINE:
         logger.warning("[OCR] OCR engine not available")
@@ -75,9 +76,8 @@ def extract_text_from_page(page: Any) -> str:
         return ""
 
     try:
-        # Convert page to high-resolution image for better OCR accuracy
         pix = page.get_pixmap(
-            matrix=fitz.Matrix(2, 2),  # 2x zoom for better OCR accuracy
+            matrix=fitz.Matrix(2, 2),
             alpha=False
         )
 
@@ -85,14 +85,12 @@ def extract_text_from_page(page: Any) -> str:
             logger.error("[OCR] PIL not available")
             return ""
 
-        # Convert to PIL Image then numpy array (more efficient)
         img = Image.frombytes(
             "RGB",
             (pix.width, pix.height),
             pix.samples
         )
         
-        # Direct conversion to numpy array (avoid intermediate copy)
         img_array = np.array(img, dtype=np.uint8)
 
         ocr_engine = _get_ocr_engine()
@@ -102,7 +100,21 @@ def extract_text_from_page(page: Any) -> str:
 
         result = ocr_engine(img_array)
         
-        if result and hasattr(result, 'txts') and result.txts:
+        if not result:
+            return ""
+        
+        if hasattr(result, 'to_markdown'):
+            try:
+                markdown_text = result.to_markdown()
+                if markdown_text and markdown_text.strip():
+                    return markdown_text
+            except Exception as e:
+                logger.warning(f"[OCR] to_markdown() failed, fallback to simple extraction: {e}")
+        
+        if hasattr(result, 'boxes') and hasattr(result, 'txts') and result.boxes is not None and result.txts:
+            return _extract_text_with_layout(result.boxes, result.txts)
+        
+        if hasattr(result, 'txts') and result.txts:
             text_lines = [txt for txt in result.txts if txt]
             return "\n".join(text_lines)
         
@@ -110,6 +122,22 @@ def extract_text_from_page(page: Any) -> str:
     except Exception as e:
         logger.error(f"OCR extraction failed: {e}", exc_info=True)
         return ""
+
+
+def _extract_text_with_layout(boxes: np.ndarray, txts: tuple) -> str:
+    """
+    Extract text preserving layout structure using box coordinates.
+    Groups text on same line and preserves table structure.
+    """
+    try:
+        from rag.ocr.utils.to_markdown import ToMarkdown
+        
+        # Use ToMarkdown to preserve layout
+        return ToMarkdown.to(boxes, txts)
+    except Exception as e:
+        logger.warning(f"[OCR] Layout extraction failed: {e}")
+        # Fallback: simple join
+        return "\n".join([txt for txt in txts if txt])
 
 
 def is_available() -> bool:

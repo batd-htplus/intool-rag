@@ -7,8 +7,14 @@ from typing import Any, Union
 
 import cv2
 import numpy as np
-import requests
 from PIL import Image, UnidentifiedImageError
+
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
+    requests = None
 
 from .utils import is_url
 
@@ -34,6 +40,11 @@ class LoadImage:
     def load_img(self, img: InputType) -> np.ndarray:
         if isinstance(img, (str, Path)):
             if is_url(img):
+                if not HAS_REQUESTS:
+                    raise LoadImageError(
+                        "requests library required to load images from URL. "
+                        "Install: pip install requests"
+                    )
                 img = Image.open(requests.get(img, stream=True, timeout=60).raw)
             else:
                 self.verify_exist(img)

@@ -19,7 +19,7 @@ from typing import Any, Dict
 import cv2
 import numpy as np
 
-from rapidocr.inference_engine.base import FileInfo, get_engine
+from ..inference_engine.base import FileInfo, get_engine
 
 from ..utils.download_file import DownloadFile, DownloadFileInput
 from ..utils.log import logger
@@ -56,30 +56,34 @@ class TextRecognizer:
             character = self.session.get_character_list()
             return character, dict_path
 
-        # onnx has character, other engine need dict_path
-        if (not dict_path and not character) or (not Path(dict_path).exists()):
-            dict_download_url = self.session.get_dict_key_url(
-                FileInfo(
-                    engine_type=cfg.engine_type,
-                    ocr_version=cfg.ocr_version,
-                    task_type=cfg.task_type,
-                    lang_type=cfg.lang_type,
-                    model_type=cfg.model_type,
-                )
-            )
-            dict_download_url = (
-                dict_download_url if dict_download_url is not None else DEFAULT_DICT_URL
-            )
-            dict_path = DEFAULT_MODEL_PATH / Path(dict_download_url).name
-            if not Path(dict_path).exists():
-                DownloadFile.run(
-                    DownloadFileInput(
-                        file_url=dict_download_url,
-                        sha256=None,
-                        save_path=dict_path,
-                        logger=self.logger,
+        if (not dict_path and not character) or (dict_path and not Path(dict_path).exists()):
+            try:
+                dict_download_url = self.session.get_dict_key_url(
+                    FileInfo(
+                        engine_type=cfg.engine_type,
+                        ocr_version=cfg.ocr_version,
+                        task_type=cfg.task_type,
+                        lang_type=cfg.lang_type,
+                        model_type=cfg.model_type,
                     )
                 )
+                dict_download_url = (
+                    dict_download_url if dict_download_url is not None else DEFAULT_DICT_URL
+                )
+                dict_path = DEFAULT_MODEL_PATH / Path(dict_download_url).name
+                if not Path(dict_path).exists():
+                    DownloadFile.run(
+                        DownloadFileInput(
+                            file_url=dict_download_url,
+                            sha256=None,
+                            save_path=dict_path,
+                            logger=self.logger,
+                        )
+                    )
+            except (ValueError, KeyError) as e:
+                self.logger.debug(f"Skipping dictionary download: {e}")
+                if not character:
+                    pass
 
         return character, dict_path
 
@@ -91,7 +95,6 @@ class TextRecognizer:
 
         width_list = [img.shape[1] / float(img.shape[0]) for img in img_list]
 
-        # Sorting can speed up the recognition process
         indices = np.argsort(np.array(width_list))
 
         img_num = len(img_list)

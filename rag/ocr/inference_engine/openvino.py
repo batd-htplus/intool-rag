@@ -24,23 +24,29 @@ class OpenVINOInferSession(InferSession):
 
         model_path = cfg.get("model_path", None)
         if model_path is None:
-            model_info = self.get_model_url(
-                FileInfo(
-                    engine_type=cfg.engine_type,
-                    ocr_version=cfg.ocr_version,
-                    task_type=cfg.task_type,
-                    lang_type=cfg.lang_type,
-                    model_type=cfg.model_type,
+            try:
+                model_info = self.get_model_url(
+                    FileInfo(
+                        engine_type=cfg.engine_type,
+                        ocr_version=cfg.ocr_version,
+                        task_type=cfg.task_type,
+                        lang_type=cfg.lang_type,
+                        model_type=cfg.model_type,
+                    )
                 )
-            )
-            model_path = self.DEFAULT_MODEL_PATH / Path(model_info["model_dir"]).name
-            download_params = DownloadFileInput(
-                file_url=model_info["model_dir"],
-                sha256=model_info["SHA256"],
-                save_path=model_path,
-                logger=self.logger,
-            )
-            DownloadFile.run(download_params)
+                model_path = self.DEFAULT_MODEL_PATH / Path(model_info["model_dir"]).name
+                download_params = DownloadFileInput(
+                    file_url=model_info["model_dir"],
+                    sha256=model_info["SHA256"],
+                    save_path=model_path,
+                    logger=self.logger,
+                )
+                DownloadFile.run(download_params)
+            except (ValueError, KeyError) as e:
+                raise ValueError(
+                    f"model_path not provided and default_models.yaml not available. "
+                    f"Please provide model_path explicitly. Error: {e}"
+                )
 
         self.logger.info(f"Using {model_path}")
         model_path = Path(model_path)

@@ -2,7 +2,6 @@
 fastapi==0.104.1
 uvicorn==0.24.0
 pydantic==2.5.0
-pydantic-settings==2.1.0
 
 # HTTP client for model-service
 httpx==0.25.0
@@ -17,14 +16,14 @@ qdrant-client==1.7.0
 # Document processing
 Pillow==10.1.0
 pymupdf==1.23.8
-PyPDF2==3.0.1
-pdfplumber==0.10.3
 
 # OCR (for scanned PDFs) - using custom OCR module
 opencv-python==4.8.1.78
 omegaconf==2.3.0
-onnxruntime==1.16.3
-numpy<2.0.0  # Required by onnxruntime
+onnxruntime==1.19.2
+numpy<2.0.0
+pyclipper==1.3.0.post5
+shapely==2.0.2
 
 # Office documents
 python-docx==0.8.11
@@ -33,4 +32,3 @@ python-pptx==0.6.23
 
 # Utilities
 langdetect==1.0.9
-python-dotenv==1.0.0

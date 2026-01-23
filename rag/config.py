@@ -13,7 +13,9 @@ class Config:
     # Embedding
     EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
     EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "cpu")
-    EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "16"))
+    EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "8"))  # Reduced for large files
+    EMBEDDING_PROGRESSIVE_BATCH = int(os.getenv("EMBEDDING_PROGRESSIVE_BATCH", "20"))  # Chunks to process before upsert
+    EMBEDDING_MAX_PARALLEL = int(os.getenv("EMBEDDING_MAX_PARALLEL", "3"))
     
     # LLM
     LLM_MODEL = os.getenv("LLM_MODEL", "Phi3:mini")
@@ -75,5 +77,24 @@ class Config:
     CONTEXT_MAX_RESULTS = int(os.getenv("CONTEXT_MAX_RESULTS", "3"))
     CONTEXT_MAX_TEXT_LENGTH = int(os.getenv("CONTEXT_MAX_TEXT_LENGTH", "800"))
     CHAT_HISTORY_MAX_MESSAGES = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "3"))
+    
+    # Structured data handling (tables, lists, etc.)
+    TABLE_BOOST_MULTIPLIER = float(os.getenv("TABLE_BOOST_MULTIPLIER", "1.5"))
+    STRUCTURED_DATA_BOOST_MULTIPLIER = float(os.getenv("STRUCTURED_DATA_BOOST_MULTIPLIER", "1.3"))
+    PRESERVE_TABLE_CONTENT = os.getenv("PRESERVE_TABLE_CONTENT", "true").lower() == "true"
+    TABLE_CONTEXT_PRIORITY = os.getenv("TABLE_CONTEXT_PRIORITY", "true").lower() == "true"
+    
+    # HTTP Client & Retry Configuration
+    HTTP_MAX_RETRIES = int(os.getenv("HTTP_MAX_RETRIES", "3"))
+    HTTP_RETRY_DELAY = float(os.getenv("HTTP_RETRY_DELAY", "2.0"))
+    HTTP_CONNECT_TIMEOUT = float(os.getenv("HTTP_CONNECT_TIMEOUT", "10.0"))
+    HTTP_READ_TIMEOUT = float(os.getenv("HTTP_READ_TIMEOUT", "120.0"))
+    HTTP_WRITE_TIMEOUT = float(os.getenv("HTTP_WRITE_TIMEOUT", "10.0"))
+    HTTP_POOL_TIMEOUT = float(os.getenv("HTTP_POOL_TIMEOUT", "10.0"))
+    HTTP_MAX_CONNECTIONS = int(os.getenv("HTTP_MAX_CONNECTIONS", "100"))
+    HTTP_MAX_KEEPALIVE_CONNECTIONS = int(os.getenv("HTTP_MAX_KEEPALIVE_CONNECTIONS", "20"))
+    
+    # Ingestion timeout (for large files)
+    INGEST_TIMEOUT = float(os.getenv("INGEST_TIMEOUT", "600.0"))  # 10 minutes for large files
 
 config = Config()

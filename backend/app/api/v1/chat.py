@@ -5,12 +5,11 @@ import time
 import uuid
 from typing import Optional
 from app.schemas.chat import ChatRequest, ChatResponse, Message, ChatChoice
-from app.services.rag_service import RAGService
+from app.services.rag_service import rag_service
 from app.core.logging import logger
 from app.core.auth import verify_auth
 
 router = APIRouter(tags=["chat"])
-rag_service = RAGService()
 
 @router.post("/completions", response_model=ChatResponse)
 async def chat_completions(
@@ -22,7 +21,6 @@ async def chat_completions(
     Supports RAG-augmented responses with document filtering.
     """
     try:
-        # Extract user message (last message should be from user)
         user_message = None
         for msg in reversed(request.messages):
             if msg.role == "user":
@@ -32,12 +30,10 @@ async def chat_completions(
         if not user_message:
             raise HTTPException(status_code=400, detail="No user message in chat history")
         
-        # Build filters from request
         filters = request.filters or {}
         if request.project:
             filters["project"] = request.project
         
-        # Query RAG service
         rag_response = await rag_service.query(
             question=user_message,
             filters=filters,
@@ -49,10 +45,8 @@ async def chat_completions(
         response_text = rag_response.get("answer", "")
         sources = rag_response.get("sources", [])
         
-        # Build response in OpenAI format
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
         
-        # Append sources to response if available
         if sources:
             sources_text = "\n\n**Sources:**\n"
             for i, source in enumerate(sources, 1):
@@ -94,7 +88,6 @@ async def chat_stream(
     """
     async def generate():
         try:
-            # Extract user message
             user_message = None
             for msg in reversed(request.messages):
                 if msg.role == "user":
@@ -105,12 +98,10 @@ async def chat_stream(
                 yield f"data: {json.dumps({'error': 'No user message'})}\n\n"
                 return
             
-            # Build filters
             filters = request.filters or {}
             if request.project:
                 filters["project"] = request.project
             
-            # Stream response
             completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
             
             async for chunk in rag_service.query_stream(
@@ -132,7 +123,6 @@ async def chat_stream(
                 }
                 yield f"data: {json.dumps(chunk_data)}\n\n"
             
-            # Send finish message
             finish_data = {
                 "id": completion_id,
                 "object": "chat.completion.chunk",

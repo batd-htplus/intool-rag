@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Union
 import cv2
 import numpy as np
 
-from rapidocr.inference_engine.base import get_engine
+from ..inference_engine.base import get_engine
 
 from .utils import ClsPostProcess, TextClsOutput
 
@@ -44,7 +44,6 @@ class TextClassifier:
         # Calculate the aspect ratio of all text bars
         width_list = [img.shape[1] / float(img.shape[0]) for img in img_list]
 
-        # Sorting can speed up the cls process
         indices = np.argsort(np.array(width_list))
 
         img_num = len(img_list)

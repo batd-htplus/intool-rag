@@ -13,9 +13,5 @@ class Settings(BaseModel):
 
     RAG_SERVICE_URL: str = os.getenv("RAG_SERVICE_URL", "http://rag-service:8001")
 
-    QDRANT_URL: str = os.getenv("QDRANT_URL", "http://qdrant:6333")
-    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "Phi3:mini")
-
 
 settings = Settings()

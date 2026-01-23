@@ -10,7 +10,9 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
     HnswConfigDiff,
+    SearchParams,
 )
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 from rag.config import config
 from rag.logging import logger
@@ -24,11 +26,7 @@ from rag.vector_store.base import (
     VectorStoreDeleteError,
 )
 
-
-# =====================================================
 # Qdrant Vector Store
-# =====================================================
-
 class QdrantVectorStore(VectorStore):
     """Production-grade Qdrant vector store for RAG."""
 
@@ -51,18 +49,21 @@ class QdrantVectorStore(VectorStore):
 
         self._ensure_collection()
 
-    # -------------------------------------------------
     # Collection setup
-    # -------------------------------------------------
-
     def _ensure_collection(self) -> None:
+        """
+        Ensure collection exists, create if it doesn't.
+        Handles race conditions where collection might be created by another instance.
+        """
         try:
             self.client.get_collection(self.collection)
             logger.info(f"[Qdrant] Using existing collection: {self.collection}")
+            self._create_payload_indexes() 
             return
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Qdrant] Collection not found, will create: {e}")
 
+        # Try to create collection
         try:
             self.client.create_collection(
                 collection_name=self.collection,
@@ -77,7 +78,15 @@ class QdrantVectorStore(VectorStore):
             )
             self._create_payload_indexes()
             logger.info(f"[Qdrant] Created collection: {self.collection}")
+        except UnexpectedResponse as e:
+            if e.status_code == 409:
+                logger.info(f"[Qdrant] Collection already exists (race condition): {self.collection}")
+                self._create_payload_indexes()  # Ensure indexes exist
+                return
+            logger.error(f"[Qdrant] Failed to create collection: {e}")
+            raise VectorStoreConnectionError(f"Failed to create collection: {e}")
         except Exception as e:
+            logger.error(f"[Qdrant] Failed to create collection: {e}")
             raise VectorStoreConnectionError(f"Failed to create collection: {e}")
 
     def _create_payload_indexes(self) -> None:
@@ -91,10 +100,7 @@ class QdrantVectorStore(VectorStore):
             except Exception:
                 pass
 
-    # -------------------------------------------------
     # Helpers
-    # -------------------------------------------------
-
     def _build_filter(self, filters: Dict[str, Any]) -> Optional[Filter]:
         if not filters:
             return None
@@ -112,41 +118,78 @@ class QdrantVectorStore(VectorStore):
 
         return Filter(must=conditions) if conditions else None
 
-    # -------------------------------------------------
     # Upsert
-    # -------------------------------------------------
-
     async def upsert(
         self,
         ids: List[str],
         vectors: List[List[float]],
         payloads: List[Dict[str, Any]],
     ) -> None:
+        """
+        Optimized batch upsert with validation.
+        
+        Features:
+        - Input validation
+        - Batch processing optimization
+        - Error handling with detailed logging
+        """
+        if not ids or not vectors or not payloads:
+            raise VectorStoreUpsertError("Empty input lists")
+        
         if not (len(ids) == len(vectors) == len(payloads)):
-            raise VectorStoreUpsertError("ids, vectors, payloads length mismatch")
+            raise VectorStoreUpsertError(
+                f"Length mismatch: ids={len(ids)}, vectors={len(vectors)}, payloads={len(payloads)}"
+            )
+
+        # Validate vector dimensions
+        expected_dim = self.vector_size
+        for i, vector in enumerate(vectors):
+            if not isinstance(vector, list):
+                raise VectorStoreUpsertError(f"Invalid vector type at index {i}")
+            if len(vector) != expected_dim:
+                raise VectorStoreUpsertError(
+                    f"Vector dimension mismatch at index {i}: expected {expected_dim}, got {len(vector)}"
+                )
 
         try:
-            points = [
-                PointStruct(
-                    id=ids[i] or uuid.uuid4().hex,
-                    vector=vectors[i],
-                    payload=payloads[i],
+            # Build points efficiently
+            points = []
+            for i in range(len(vectors)):
+                point_id = ids[i] if ids[i] else uuid.uuid4().hex
+                
+                payload = payloads[i]
+                if not isinstance(payload, dict):
+                    logger.warning(f"Invalid payload type at index {i}, skipping")
+                    continue
+                
+                if "text" not in payload:
+                    logger.warning(f"Missing 'text' field in payload at index {i}, skipping")
+                    continue
+                
+                points.append(
+                    PointStruct(
+                        id=point_id,
+                        vector=vectors[i],
+                        payload=payload,
+                    )
                 )
-                for i in range(len(vectors))
-            ]
+
+            if not points:
+                logger.warning("[Qdrant] No valid points to upsert")
+                return
 
             self.client.upsert(
                 collection_name=self.collection,
                 points=points,
             )
+            
+            logger.debug(f"[Qdrant] Upserted {len(points)} points successfully")
+            
         except Exception as e:
-            logger.error(f"[Qdrant] Upsert failed: {e}")
+            logger.error(f"[Qdrant] Upsert failed: {e}", exc_info=True)
             raise VectorStoreUpsertError(str(e))
 
-    # -------------------------------------------------
     # Search
-    # -------------------------------------------------
-
     async def search(
         self,
         query_vector: List[float],
@@ -157,6 +200,11 @@ class QdrantVectorStore(VectorStore):
         try:
             query_filter = self._build_filter(filters)
 
+            # Use optimized HNSW search parameters
+            search_params = None
+            if config.QDRANT_HNSW_EF_SEARCH:
+                search_params = SearchParams(hnsw_ef=config.QDRANT_HNSW_EF_SEARCH)
+            
             hits = self.client.search(
                 collection_name=self.collection,
                 query_vector=query_vector,
@@ -165,6 +213,7 @@ class QdrantVectorStore(VectorStore):
                 with_payload=True,
                 with_vectors=False,
                 score_threshold=score_threshold,
+                search_params=search_params,
             )
 
             return [
@@ -180,10 +229,7 @@ class QdrantVectorStore(VectorStore):
             logger.error(f"[Qdrant] Search failed: {e}")
             raise VectorStoreSearchError(str(e))
 
-    # -------------------------------------------------
     # Delete
-    # -------------------------------------------------
-
     async def delete(
         self,
         ids: Optional[List[str]] = None,
@@ -213,10 +259,6 @@ class QdrantVectorStore(VectorStore):
         except Exception as e:
             logger.error(f"[Qdrant] Delete failed: {e}")
             raise VectorStoreDeleteError(str(e))
-
-    # -------------------------------------------------
-    # Maintenance
-    # -------------------------------------------------
 
     async def clear(self) -> None:
         try:

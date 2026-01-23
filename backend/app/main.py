@@ -51,6 +51,7 @@ async def list_models():
     }
 
 from app.api.v1.chat import chat_completions, chat_stream
+from app.services.rag_service import rag_service
 app.post("/v1/chat/completions")(chat_completions)
 app.post("/v1/chat/completions/stream")(chat_stream)
 
@@ -85,7 +86,8 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    pass
+    """Cleanup resources"""
+    await rag_service.close()
 
 if __name__ == "__main__":
     import uvicorn

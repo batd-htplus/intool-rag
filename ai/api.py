@@ -253,11 +253,33 @@ async def generate(request: GenerateRequest):
             
         except HTTPException:
             raise
+        except RuntimeError as e:
+            error_msg = str(e)
+            logger.error(f"Generation error: {error_msg}")
+            
+            if "memory" in error_msg.lower() or "ram" in error_msg.lower():
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"LLM service error: {error_msg}. "
+                           "Model requires more memory than available. "
+                           "Consider using a smaller model or increasing system memory."
+                )
+            elif "model" in error_msg.lower() and "not found" in error_msg.lower():
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"LLM service error: {error_msg}. "
+                           "Model not found. Please ensure the model is available in Ollama."
+                )
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"LLM service error: {error_msg}"
+                )
         except Exception as e:
-            logger.error(f"Generation error: {e}")
+            logger.error(f"Generation error: {e}", exc_info=True)
             raise HTTPException(
                 status_code=500,
-                detail="Internal server error during generation"
+                detail=f"Internal server error during generation: {str(e)}"
             )
 
 @app.get("/config")

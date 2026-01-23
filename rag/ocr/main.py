@@ -417,7 +417,7 @@ def main(arg_list: Optional[List[str]] = None):
 
     if args.to_markdown:
         try:
-            from rapidocr.utils.to_markdown import to_markdown
+            from .utils.to_markdown import to_markdown
         except ImportError:
             print("Cannot import to_markdown. Please check rapidocr/utils/to_markdown.py.")
             return
@@ -429,7 +429,7 @@ def main(arg_list: Optional[List[str]] = None):
 
     if args.to_json:
         try:
-            from rapidocr.utils.to_json import to_json
+            from .utils.to_json import to_json
         except ImportError:
             print("Cannot import to_json. Please check rapidocr/utils/to_json.py.")
             return

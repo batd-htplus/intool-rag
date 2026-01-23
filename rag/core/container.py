@@ -42,10 +42,16 @@ class Container:
         """
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(120.0, connect=10.0, read=120.0, write=10.0, pool=10.0),
+                timeout=httpx.Timeout(
+                    config.HTTP_READ_TIMEOUT,
+                    connect=config.HTTP_CONNECT_TIMEOUT,
+                    read=config.HTTP_READ_TIMEOUT,
+                    write=config.HTTP_WRITE_TIMEOUT,
+                    pool=config.HTTP_POOL_TIMEOUT
+                ),
                 limits=httpx.Limits(
-                    max_connections=100,
-                    max_keepalive_connections=20
+                    max_connections=config.HTTP_MAX_CONNECTIONS,
+                    max_keepalive_connections=config.HTTP_MAX_KEEPALIVE_CONNECTIONS
                 )
             )
         return self._http_client
@@ -77,7 +83,9 @@ class Container:
         """
         provider_type = provider_type or config.EMBEDDING_PROVIDER_TYPE
         
-        config_key = f"embedding_{provider_type}_{str(kwargs)}"
+        # Generate stable config key (sorted kwargs for consistency)
+        sorted_kwargs = tuple(sorted(kwargs.items())) if kwargs else ()
+        config_key = f"embedding_{provider_type}_{sorted_kwargs}"
         if self._embedding_provider and self._provider_configs.get("embedding") == config_key:
             return self._embedding_provider
         
@@ -117,7 +125,9 @@ class Container:
         """
         provider_type = provider_type or config.LLM_PROVIDER_TYPE
         
-        config_key = f"llm_{provider_type}_{str(kwargs)}"
+        # Generate stable config key (sorted kwargs for consistency)
+        sorted_kwargs = tuple(sorted(kwargs.items())) if kwargs else ()
+        config_key = f"llm_{provider_type}_{sorted_kwargs}"
         if self._llm_provider and self._provider_configs.get("llm") == config_key:
             return self._llm_provider
         
@@ -161,7 +171,9 @@ class Container:
         
         provider_type = provider_type or config.RERANKER_PROVIDER_TYPE
         
-        config_key = f"reranker_{provider_type}_{str(kwargs)}"
+        # Generate stable config key (sorted kwargs for consistency)
+        sorted_kwargs = tuple(sorted(kwargs.items())) if kwargs else ()
+        config_key = f"reranker_{provider_type}_{sorted_kwargs}"
         if self._reranker_provider and self._provider_configs.get("reranker") == config_key:
             return self._reranker_provider
         

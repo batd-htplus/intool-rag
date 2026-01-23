@@ -1,29 +1,38 @@
-# RAG System
+# RAG System - Retrieval Augmented Generation - RAG
 
-Retrieval Augmented Generation with hybrid search, semantic chunking and multi-service architecture.
+A retrieval-augmented generation system with hybrid search, semantic chunking, and OCR support.
+
+## Architecture
+
+![alt text](image.png)
 
 
-## 🔑 Core Features
+- **Backend** (8000): Main API, handles requests
+- **RAG Service** (8001): Document processing, chunking, retrieval
+- **AI Service** (8002): Embeddings and LLM inference
+- **Qdrant** (6333): Vector database
+- **Web UI** (3000): Open WebUI interface
 
-### 1. Hybrid Search
-- **Vector search** (BGE-M3 embeddings) + **BM25 keyword search**
-- Optional reranking with cross-encoder
-- Dynamic weighting: `VECTOR_WEIGHT=0.7`, `BM25_WEIGHT=0.3`
+## Features
 
-### 2. Semantic Chunking
-- Chunk by documents (Markdown headings, sections)
-- Token-aware for BGE-M3 (~512 tokens/chunk)
-- CJK-aware (character-based for JP/)
+### Hybrid Search
 
-### 3. Multi-Level Caching
-- **Embedding cache**: Re-embedding text duplicate
-- **Query cache**: Cache retrieval results
-- File-based with content hash
+Combines vector search (semantic) and BM25 (keyword) for better results.
 
-### 4. Provider Abstraction
-- Switch between Ollama, HuggingFace, OpenAI
-- HTTP-based providers with connection pooling
-- Dependency Injection container
+Example: Searching for "machine learning" finds documents mentioning "ML", "neural networks", or "deep learning" (vector) plus exact keyword matches (BM25).
 
-**Last Updated**: 2025-01-14  
-**Version**: 0.2.0
+### Semantic Chunking
+
+Splits documents intelligently:
+- Respects document structure (headings, sections)
+- Keeps chunks around 512 tokens for BGE-M3
+- Handles CJK languages properly
+
+Example: A 10-page PDF gets split into ~20-30 meaningful chunks, not arbitrary 500-character pieces.
+
+### OCR Support
+
+Extracts text from scanned PDFs and images automatically.
+
+Example: Upload a scanned invoice → OCR extracts text → chunks and indexes it → you can search and ask questions.
+

@@ -9,7 +9,7 @@ import sys
 
 # Configuration
 RAG_SERVICE_URL = "http://localhost:8001"
-TEST_QUESTION = "What is the total amount due on invoice #4820 for Aaron Hawkins, and which product was purchased?"
+TEST_QUESTION = "Are there any discounts or additional charges applied to Invoice #4820?"
 
 def test_health():
     """Test health endpoint"""
@@ -48,10 +48,11 @@ def test_query():
     payload = {
         "question": TEST_QUESTION,
         "filters": None,
-        "temperature": 0.7,
+        "temperature": 0.0,  # Deterministic output - no randomness
         "max_tokens": 512,
         "stream": False,
-        "include_sources": True
+        "include_sources": True,
+        "include_prompt": True  # Include prompt in response for debugging
     }
     
     print(f"\nRequest payload:")
@@ -74,6 +75,14 @@ def test_query():
         print(f"\n✓ Query successful!")
         print(f"\nResponse:")
         print(json.dumps(result, indent=2, ensure_ascii=False))
+        
+        # Print prompt if available
+        if "prompt" in result:
+            print(f"\n" + "=" * 60)
+            print("PROMPT SENT TO LLM:")
+            print("=" * 60)
+            print(result["prompt"])
+            print("=" * 60)
         
         if "answer" in result:
             answer = result['answer']

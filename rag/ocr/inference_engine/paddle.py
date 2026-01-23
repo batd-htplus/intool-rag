@@ -71,31 +71,37 @@ class PaddleInferSession(InferSession):
 
         model_dir = cfg.get("model_dir", None)
         if model_dir is None:
-            model_info = self.get_model_url(
-                FileInfo(
-                    engine_type=cfg.engine_type,
-                    ocr_version=cfg.ocr_version,
-                    task_type=cfg.task_type,
-                    lang_type=cfg.lang_type,
-                    model_type=cfg.model_type,
-                )
-            )
-            default_model_dir = model_info["model_dir"]
-
             try:
-                pdmodel_path = self.download_model(
-                    model_info, default_model_dir, pdmodel_name
+                model_info = self.get_model_url(
+                    FileInfo(
+                        engine_type=cfg.engine_type,
+                        ocr_version=cfg.ocr_version,
+                        task_type=cfg.task_type,
+                        lang_type=cfg.lang_type,
+                        model_type=cfg.model_type,
+                    )
                 )
-            except ConfigKeyError as e:
-                pdmodel_path = self.download_model(
-                    model_info, default_model_dir, pdmodel_name_v2
-                )
-            except Exception as e:
-                raise PaddleInferError(f"Download model error: {e}") from e
+                default_model_dir = model_info["model_dir"]
 
-            pdiparams_path = self.download_model(
-                model_info, default_model_dir, pdiparams_name
-            )
+                try:
+                    pdmodel_path = self.download_model(
+                        model_info, default_model_dir, pdmodel_name
+                    )
+                except ConfigKeyError as e:
+                    pdmodel_path = self.download_model(
+                        model_info, default_model_dir, pdmodel_name_v2
+                    )
+                except Exception as e:
+                    raise PaddleInferError(f"Download model error: {e}") from e
+
+                pdiparams_path = self.download_model(
+                    model_info, default_model_dir, pdiparams_name
+                )
+            except (ValueError, KeyError) as e:
+                raise PaddleInferError(
+                    f"model_dir not provided and default_models.yaml not available. "
+                    f"Please provide model_dir explicitly. Error: {e}"
+                ) from e
 
             self.logger.info(f"Using {pdmodel_path}")
             self.logger.info(f"Using {pdiparams_path}")

@@ -27,30 +27,10 @@ async def get_model_config():
             if response.status_code == 200:
                 return response.json()
             else:
-                return {
-                    "embedding_model": settings.EMBEDDING_MODEL,
-                    "llm_model": settings.LLM_MODEL,
-                    "embedding_device": "cpu",
-                    "llm_device": "cpu",
-                    "temperature": 0.7,
-                    "max_tokens": 1024,
-                    "chunk_size": 512,
-                    "chunk_overlap": 50,
-                    "retrieval_top_k": 5,
-                }
+                raise HTTPException(status_code=503, detail="RAG service unavailable")
     except Exception as e:
         logger.error(f"Error getting model config: {str(e)}")
-        return {
-            "embedding_model": settings.EMBEDDING_MODEL,
-            "llm_model": settings.LLM_MODEL,
-            "embedding_device": "cpu",
-            "llm_device": "cpu",
-            "temperature": 0.7,
-            "max_tokens": 1024,
-            "chunk_size": 512,
-            "chunk_overlap": 50,
-            "retrieval_top_k": 5,
-        }
+        raise HTTPException(status_code=503, detail=f"Failed to connect to RAG service: {str(e)}")
 
 @router.put("/model")
 async def update_model_config(config: ModelConfig):

@@ -7,8 +7,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
-import requests
-from tqdm import tqdm
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
+    requests = None
+
+try:
+    from tqdm import tqdm
+    HAS_TQDM = True
+except ImportError:
+    HAS_TQDM = False
+    tqdm = None
 
 from .utils import get_file_sha256
 
@@ -64,7 +75,11 @@ class DownloadFile:
         return False
 
     @classmethod
-    def _make_http_request(cls, url: str, logger: logging.Logger) -> requests.Response:
+    def _make_http_request(cls, url: str, logger: logging.Logger):
+        if not HAS_REQUESTS:
+            raise DownloadFileException(
+                "requests library required for downloads. Install: pip install requests"
+            )
         logger.info("Initiating download: %s", url)
         try:
             response = requests.get(url, stream=True, timeout=cls.REQUEST_TIMEOUT)
@@ -76,20 +91,26 @@ class DownloadFile:
 
     @classmethod
     def _save_response_with_progress(
-        cls, response: requests.Response, save_path: Path, logger: logging.Logger
+        cls, response, save_path: Path, logger: logging.Logger
     ) -> None:
         total_size = int(response.headers.get("content-length", 0))
         logger.info("Download size: %.2fMB", total_size / 1024 / 1024)
 
-        with tqdm(
-            total=total_size,
-            unit="iB",
-            unit_scale=True,
-            disable=not cls.check_is_atty(),
-        ) as progress_bar:
+        if HAS_TQDM and cls.check_is_atty():
+            with tqdm(
+                total=total_size,
+                unit="iB",
+                unit_scale=True,
+                disable=False,
+            ) as progress_bar:
+                with open(save_path, "wb") as output_file:
+                    for chunk in response.iter_content(chunk_size=cls.BLOCK_SIZE):
+                        progress_bar.update(len(chunk))
+                        output_file.write(chunk)
+        else:
+            # Fallback without progress bar
             with open(save_path, "wb") as output_file:
                 for chunk in response.iter_content(chunk_size=cls.BLOCK_SIZE):
-                    progress_bar.update(len(chunk))
                     output_file.write(chunk)
 
         logger.info("Successfully saved to: %s", save_path)

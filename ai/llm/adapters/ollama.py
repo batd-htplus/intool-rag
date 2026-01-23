@@ -55,14 +55,51 @@ class OllamaAdapter(BaseLLM):
                         "stream": False
                     }
                 )
-                response.raise_for_status()
                 
+                if response.status_code != 200:
+                    try:
+                        error_data = response.json()
+                        error_msg = error_data.get("error", f"HTTP {response.status_code}")
+                        logger.error(
+                            f"Ollama API error ({response.status_code}): {error_msg}. "
+                            f"Model: {self.model_name}, URL: {self.base_url}"
+                        )
+                        raise RuntimeError(f"Ollama error: {error_msg}")
+                    except ValueError:
+                        logger.error(
+                            f"Ollama HTTP error {response.status_code}: {response.text[:500]}"
+                        )
+                        raise RuntimeError(
+                            f"Ollama HTTP error {response.status_code}: {response.text[:200]}"
+                        )
+                
+                response.raise_for_status()
                 result = response.json()
+                
+                if "error" in result:
+                    error_msg = result.get("error", "Unknown error")
+                    logger.error(f"Ollama returned error in response: {error_msg}")
+                    raise RuntimeError(f"Ollama error: {error_msg}")
+                
                 return result.get("response", "").strip()
         
+        except httpx.HTTPStatusError as e:
+            try:
+                error_data = e.response.json()
+                error_msg = error_data.get("error", str(e))
+                logger.error(
+                    f"Ollama HTTP error {e.response.status_code}: {error_msg}. "
+                    f"Model: {self.model_name}"
+                )
+                raise RuntimeError(f"Ollama error: {error_msg}")
+            except (ValueError, AttributeError):
+                logger.error(f"Ollama HTTP error: {str(e)}")
+                raise RuntimeError(f"Ollama HTTP error: {str(e)}")
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error(f"Ollama generation error: {str(e)}")
-            raise
+            raise RuntimeError(f"Ollama generation failed: {str(e)}")
     
     async def generate_stream(
         self,

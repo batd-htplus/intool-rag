@@ -123,6 +123,38 @@ class SemanticChunker:
 
     def _chunk_plain_text(self, text: str) -> List[Tuple[str, Dict]]:
         chunks = []
+        
+        if "[TABLE]" in text and "[/TABLE]" in text:
+            table_blocks = self._extract_table_blocks(text)
+            if table_blocks:
+                current_text = text
+                for table_block in table_blocks:
+                    before_table = current_text[:current_text.find(table_block)]
+                    if before_table.strip():
+                        chunks.extend(self._chunk_plain_text_no_table(before_table))
+                    
+                    table_tokens = self._estimate_tokens(table_block)
+                    chunks.append((
+                        table_block,
+                        {
+                            "doc_type": "table",
+                            "tokens": table_tokens,
+                            "has_table": True
+                        }
+                    ))
+                    
+                    current_text = current_text[current_text.find(table_block) + len(table_block):]
+                
+                if current_text.strip():
+                    chunks.extend(self._chunk_plain_text_no_table(current_text))
+                
+                return chunks
+        
+        return self._chunk_plain_text_no_table(text)
+    
+    def _chunk_plain_text_no_table(self, text: str) -> List[Tuple[str, Dict]]:
+        """Chunk plain text without table detection (internal helper to avoid recursion)"""
+        chunks = []
         paragraphs = re.split(r'\n\s*\n+', text)
 
         buffer = []
@@ -207,12 +239,85 @@ class SemanticChunker:
 
         text = text.strip()
 
+        # FIX 1: Preserve table content as single chunk
+        # Detect [TABLE]...[/TABLE] blocks and keep them intact
+        if "[TABLE]" in text and "[/TABLE]" in text:
+            table_blocks = self._extract_table_blocks(text)
+            if table_blocks:
+                chunks = []
+                current_text = text
+                
+                for table_block in table_blocks:
+                    # Extract text before table
+                    before_table = current_text[:current_text.find(table_block)]
+                    if before_table.strip():
+                        # Chunk text before table normally
+                        if doc_type == DocumentType.MARKDOWN or (
+                            doc_type == DocumentType.PLAIN_TEXT and re.search(r'^#+\s+', before_table, re.MULTILINE)
+                        ):
+                            chunks.extend(self._chunk_markdown(before_table))
+                        else:
+                            chunks.extend(self._chunk_plain_text(before_table))
+                    
+                    # Keep table as single chunk
+                    table_tokens = self._estimate_tokens(table_block)
+                    chunks.append((
+                        table_block,
+                        {
+                            "doc_type": "table",
+                            "tokens": table_tokens,
+                            "has_table": True
+                        }
+                    ))
+                    
+                    # Update current_text to after table
+                    current_text = current_text[current_text.find(table_block) + len(table_block):]
+                
+                # Chunk remaining text after last table
+                if current_text.strip():
+                    if doc_type == DocumentType.MARKDOWN or (
+                        doc_type == DocumentType.PLAIN_TEXT and re.search(r'^#+\s+', current_text, re.MULTILINE)
+                    ):
+                        chunks.extend(self._chunk_markdown(current_text))
+                    else:
+                        chunks.extend(self._chunk_plain_text(current_text))
+                
+                return chunks
+
         if doc_type == DocumentType.MARKDOWN or (
             doc_type == DocumentType.PLAIN_TEXT and re.search(r'^#+\s+', text, re.MULTILINE)
         ):
             return self._chunk_markdown(text)
 
         return self._chunk_plain_text(text)
+    
+    def _extract_table_blocks(self, text: str) -> List[str]:
+        """
+        Extract all [TABLE]...[/TABLE] blocks from text.
+        
+        Returns:
+            List of table block strings (including markers)
+        """
+        blocks = []
+        start_marker = "[TABLE]"
+        end_marker = "[/TABLE]"
+        
+        start_idx = 0
+        while True:
+            start_pos = text.find(start_marker, start_idx)
+            if start_pos == -1:
+                break
+            
+            end_pos = text.find(end_marker, start_pos)
+            if end_pos == -1:
+                blocks.append(text[start_pos:])
+                break
+            
+            table_block = text[start_pos:end_pos + len(end_marker)]
+            blocks.append(table_block)
+            start_idx = end_pos + len(end_marker)
+        
+        return blocks
 
     def chunk(self, text: str, doc_type: str = DocumentType.PLAIN_TEXT) -> List[str]:
         return [c[0] for c in self.chunk_with_metadata(text, doc_type)]

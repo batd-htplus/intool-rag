@@ -1,4 +1,6 @@
-FROM python:3.11-slim
+ARG PYTHON_VERSION=3.11-slim
+ARG BASE_IMAGE=python:${PYTHON_VERSION}
+FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
@@ -11,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxslt1-dev \
     zlib1g-dev \
     curl \
+    patchelf \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -21,7 +24,8 @@ COPY rag/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir "numpy<2.0.0" && \
     pip install --no-cache-dir -r requirements.txt && \
     pip check && \
-    pip cache purge
+    pip cache purge && \
+    find /usr/local/lib/python3.11/site-packages/onnxruntime -name "*.so" -type f -exec patchelf --clear-execstack {} \; 2>/dev/null || true
 
 COPY rag /app/rag
 

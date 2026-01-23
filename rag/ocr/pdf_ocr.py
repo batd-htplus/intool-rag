@@ -1,7 +1,8 @@
 """
 PDF OCR wrapper - extracts text from PDF pages using OCR engine
+Enhanced with DPI control, preprocessing, and confidence filtering
 """
-from typing import Optional, Any
+from typing import Optional, Any, Tuple, Dict, List
 from rag.logging import logger
 import numpy as np
 
@@ -30,7 +31,6 @@ except ImportError as e:
     logger.warning(f"[OCR] Failed to import OCR engine: {e}")
     HAS_OCR_ENGINE = False
 except Exception as e:
-    logger.warning(f"[OCR] OCR engine initialization error: {e}")
     HAS_OCR_ENGINE = False
 
 
@@ -56,34 +56,86 @@ def _get_ocr_engine():
     return _ocr_engine
 
 
-def extract_text_from_page(page: Any) -> str:
+def _preprocess_image(
+    img_array: np.ndarray,
+    grayscale: bool = False,
+    threshold: Optional[int] = None
+) -> np.ndarray:
     """
-    Extract text from PDF page using OCR engine with layout preservation.
-    Uses box coordinates to maintain table structure and key-value pairs.
+    Preprocess image for better OCR accuracy.
+    
+    Args:
+        img_array: Input image array
+        grayscale: Convert to grayscale
+        threshold: Apply binary threshold (0-255)
+    
+    Returns:
+        Preprocessed image array
+    """
+    if not HAS_PIL:
+        return img_array
+    
+    try:
+        img = Image.fromarray(img_array)
+        
+        if grayscale:
+            img = img.convert('L')
+        
+        if threshold is not None:
+            img = img.point(lambda p: 255 if p > threshold else 0, mode='1')
+        
+        return np.array(img, dtype=np.uint8)
+    except Exception as e:
+        logger.warning(f"[OCR] Preprocessing failed: {e}")
+        return img_array
+
+
+def extract_text_from_page(
+    page: Any,
+    dpi: int = 300,
+    grayscale: bool = False,
+    threshold: Optional[int] = None,
+    text_score: float = 0.5,
+    box_thresh: float = 0.5,
+    lang_hint: Optional[str] = None,
+    return_confidence: bool = False
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """
+    Extract text from PDF page using OCR engine with enhanced control.
     
     Args:
         page: PyMuPDF page object
-        
+        dpi: Render DPI (default 300 for high quality)
+        grayscale: Convert to grayscale before OCR
+        threshold: Binary threshold (0-255), None to disable
+        text_score: Minimum text confidence score (0.0-1.0)
+        box_thresh: Minimum box confidence threshold (0.0-1.0)
+        lang_hint: Language hint for OCR (e.g., 'vi', 'en', 'ch')
+        return_confidence: Return confidence scores and metadata
+    
     Returns:
-        Extracted text string with preserved layout structure
+        Tuple of (extracted_text, metadata_dict) if return_confidence else (extracted_text, None)
     """
     if not HAS_OCR_ENGINE:
         logger.warning("[OCR] OCR engine not available")
-        return ""
+        return ("", None if not return_confidence else {"error": "OCR engine not available"})
 
     if not HAS_PYMUPDF:
         logger.warning("[OCR] PyMuPDF not available - OCR fallback disabled")
-        return ""
+        return ("", None if not return_confidence else {"error": "PyMuPDF not available"})
 
     try:
+        zoom = dpi / 72.0
+        matrix = fitz.Matrix(zoom, zoom)
+        
         pix = page.get_pixmap(
-            matrix=fitz.Matrix(2, 2),
+            matrix=matrix,
             alpha=False
         )
 
         if not HAS_PIL:
             logger.error("[OCR] PIL not available")
-            return ""
+            return ("", None if not return_confidence else {"error": "PIL not available"})
 
         img = Image.frombytes(
             "RGB",
@@ -92,51 +144,105 @@ def extract_text_from_page(page: Any) -> str:
         )
         
         img_array = np.array(img, dtype=np.uint8)
+        
+        img_array = _preprocess_image(img_array, grayscale=grayscale, threshold=threshold)
 
         ocr_engine = _get_ocr_engine()
         if ocr_engine is None:
             logger.error("[OCR] OCR engine is None, cannot extract text.")
-            return ""
+            return ("", None if not return_confidence else {"error": "OCR engine is None"})
 
-        result = ocr_engine(img_array)
+        result = ocr_engine(
+            img_array,
+            text_score=text_score,
+            box_thresh=box_thresh
+        )
         
         if not result:
-            return ""
+            return ("", None if not return_confidence else {"no_text": True})
+        
+        metadata = None
+        if return_confidence:
+            metadata = {
+                "dpi": dpi,
+                "preprocessing": {"grayscale": grayscale, "threshold": threshold},
+                "text_score": text_score,
+                "box_thresh": box_thresh,
+                "lang_hint": lang_hint
+            }
+            
+            if hasattr(result, 'scores') and result.scores:
+                scores = result.scores
+                metadata["avg_confidence"] = float(np.mean(scores)) if len(scores) > 0 else 0.0
+                metadata["min_confidence"] = float(np.min(scores)) if len(scores) > 0 else 0.0
+                metadata["max_confidence"] = float(np.max(scores)) if len(scores) > 0 else 0.0
+                metadata["low_confidence_lines"] = sum(1 for s in scores if s < 0.5)
         
         if hasattr(result, 'to_markdown'):
             try:
                 markdown_text = result.to_markdown()
                 if markdown_text and markdown_text.strip():
-                    return markdown_text
+                    return (markdown_text, metadata)
             except Exception as e:
                 logger.warning(f"[OCR] to_markdown() failed, fallback to simple extraction: {e}")
         
         if hasattr(result, 'boxes') and hasattr(result, 'txts') and result.boxes is not None and result.txts:
-            return _extract_text_with_layout(result.boxes, result.txts)
+            text = _extract_text_with_layout(result.boxes, result.txts, text_score=text_score)
+            return (text, metadata)
         
         if hasattr(result, 'txts') and result.txts:
-            text_lines = [txt for txt in result.txts if txt]
-            return "\n".join(text_lines)
+            txts = result.txts
+            if hasattr(result, 'scores') and result.scores:
+                filtered_txts = [
+                    txt for txt, score in zip(txts, result.scores)
+                    if score >= text_score
+                ]
+                txts = filtered_txts if filtered_txts else txts
+            
+            text_lines = [txt for txt in txts if txt]
+            return ("\n".join(text_lines), metadata)
         
-        return ""
+        return ("", metadata)
     except Exception as e:
         logger.error(f"OCR extraction failed: {e}", exc_info=True)
-        return ""
+        return ("", None if not return_confidence else {"error": str(e)})
 
 
-def _extract_text_with_layout(boxes: np.ndarray, txts: tuple) -> str:
+def _extract_text_with_layout(
+    boxes: np.ndarray,
+    txts: tuple,
+    text_score: float = 0.5,
+    scores: Optional[List[float]] = None
+) -> str:
     """
     Extract text preserving layout structure using box coordinates.
     Groups text on same line and preserves table structure.
+    Filters by confidence if scores provided.
     """
     try:
         from rag.ocr.utils.to_markdown import ToMarkdown
         
-        # Use ToMarkdown to preserve layout
+        if scores and len(scores) == len(txts):
+            filtered_boxes = []
+            filtered_txts = []
+            for box, txt, score in zip(boxes, txts, scores):
+                if score >= text_score:
+                    filtered_boxes.append(box)
+                    filtered_txts.append(txt)
+            
+            if filtered_boxes:
+                boxes = np.array(filtered_boxes)
+                txts = tuple(filtered_txts)
+        
         return ToMarkdown.to(boxes, txts)
     except Exception as e:
         logger.warning(f"[OCR] Layout extraction failed: {e}")
-        # Fallback: simple join
+        if scores and len(scores) == len(txts):
+            filtered_txts = [
+                txt for txt, score in zip(txts, scores)
+                if score >= text_score
+            ]
+            return "\n".join([txt for txt in filtered_txts if txt])
         return "\n".join([txt for txt in txts if txt])
 
 

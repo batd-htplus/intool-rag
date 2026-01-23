@@ -36,7 +36,14 @@ class VisRes:
         self.text_score = text_score
         self.load_img = LoadImage()
 
-        self.font_cfg = OmegaConf.load(FONT_YAML_PATH).fonts
+        if FONT_YAML_PATH.exists():
+            try:
+                self.font_cfg = OmegaConf.load(FONT_YAML_PATH).fonts
+            except Exception:
+                self.font_cfg = None
+        else:
+            self.font_cfg = None
+        
         self.font_path = self.get_font_path(font_path, lang_type)
 
     def __call__(
@@ -85,47 +92,70 @@ class VisRes:
         font_path: Optional[Union[str, Path]] = None,
         lang_type: Optional[LangRec] = None,
     ) -> str:
-        default_info = self.font_cfg["ch"]
-        default_input_params = DownloadFileInput(
-            file_url=default_info["path"],
-            sha256=default_info["SHA256"],
-            save_path=DEFAULT_FONT_PATH,
-            logger=self.logger,
-        )
-
-        if lang_type is None:
-            # 没有指定语种，用默认字体文件
-            DownloadFile.run(default_input_params)
+        # If font_path is provided, use it directly
+        if font_path:
+            return str(font_path)
+        
+        # If default_models.yaml not available, use default font path (may not exist)
+        if self.font_cfg is None:
+            self.logger.debug("default_models.yaml not found, using default font path")
             return str(DEFAULT_FONT_PATH)
+        
+        # Try to get font from config
+        try:
+            default_info = self.font_cfg["ch"]
+            default_input_params = DownloadFileInput(
+                file_url=default_info["path"],
+                sha256=default_info["SHA256"],
+                save_path=DEFAULT_FONT_PATH,
+                logger=self.logger,
+            )
 
-        lang_type = lang_type.value
-
-        if font_path is None:
-            # 指定了语种，但是没有指定字体文件，根据语种选择字体文件
-            font_info = self.font_cfg.get(lang_type, None)
-            font_url, font_sha256 = font_info["path"], font_info["SHA256"]
-
-            if font_url is None:
-                self.logger.warning(
-                    "Font file for %s is not found in the supported font list. Default font file will be used.",
-                    lang_type,
-                )
-
-                DownloadFile.run(default_input_params)
+            if lang_type is None:
+                # No language specified, use default font
+                if not DEFAULT_FONT_PATH.exists():
+                    DownloadFile.run(default_input_params)
                 return str(DEFAULT_FONT_PATH)
 
-            save_font_path = DEFAULT_FONT_DIR / f"{Path(font_url).name}"
-            input_param = DownloadFileInput(
-                file_url=font_url,
-                sha256=font_sha256,
-                save_path=save_font_path,
-                logger=self.logger,
-                verbose=False,
-            )
-            DownloadFile.run(input_param)
-            return str(save_font_path)
+            lang_type = lang_type.value
 
-        return str(font_path)
+            if font_path is None:
+                # Language specified but no font path, select font by language
+                font_info = self.font_cfg.get(lang_type, None)
+                if font_info is None:
+                    self.logger.warning(
+                        f"Font file for {lang_type} not found in config. Using default font."
+                    )
+                    if not DEFAULT_FONT_PATH.exists():
+                        DownloadFile.run(default_input_params)
+                    return str(DEFAULT_FONT_PATH)
+
+                font_url, font_sha256 = font_info["path"], font_info["SHA256"]
+
+                if font_url is None:
+                    self.logger.warning(
+                        f"Font URL for {lang_type} is None. Using default font."
+                    )
+                    if not DEFAULT_FONT_PATH.exists():
+                        DownloadFile.run(default_input_params)
+                    return str(DEFAULT_FONT_PATH)
+
+                save_font_path = DEFAULT_FONT_DIR / f"{Path(font_url).name}"
+                if not save_font_path.exists():
+                    input_param = DownloadFileInput(
+                        file_url=font_url,
+                        sha256=font_sha256,
+                        save_path=save_font_path,
+                        logger=self.logger,
+                        verbose=False,
+                    )
+                    DownloadFile.run(input_param)
+                return str(save_font_path)
+        except Exception as e:
+            self.logger.warning(f"Error loading font config: {e}. Using default font path.")
+            return str(DEFAULT_FONT_PATH)
+
+        return str(font_path) if font_path else str(DEFAULT_FONT_PATH)
 
     def draw_rec_res(
         self,

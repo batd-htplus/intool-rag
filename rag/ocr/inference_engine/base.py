@@ -17,6 +17,20 @@ from ..utils.utils import import_package
 cur_dir = Path(__file__).resolve().parent.parent
 MODEL_URL_PATH = cur_dir / "default_models.yaml"
 
+# Lazy load model_info only when needed (for download functionality)
+_model_info_cache = None
+
+def _get_model_info():
+    """Lazy load model info only when needed for download"""
+    global _model_info_cache
+    if _model_info_cache is None:
+        if MODEL_URL_PATH.exists():
+            _model_info_cache = OmegaConf.load(MODEL_URL_PATH)
+        else:
+            # Return empty config if file doesn't exist (models already provided)
+            _model_info_cache = OmegaConf.create({})
+    return _model_info_cache
+
 
 def get_engine(engine_type: EngineType):
     logger.info("Using engine_name: %s", engine_type.value)
@@ -66,8 +80,12 @@ class FileInfo:
 
 
 class InferSession(abc.ABC):
-    model_info = OmegaConf.load(MODEL_URL_PATH)
     DEFAULT_MODEL_PATH = cur_dir / "models"
+    
+    @property
+    def model_info(self):
+        """Lazy load model info only when needed"""
+        return _get_model_info()
 
     @abc.abstractmethod
     def __init__(self, config):
@@ -95,8 +113,13 @@ class InferSession(abc.ABC):
 
     @classmethod
     def get_model_url(cls, file_info: FileInfo) -> Dict[str, str]:
+        """Get model URL from registry (only used when model_path is not provided)"""
+        model_info = _get_model_info()
+        if not model_info:
+            raise ValueError("default_models.yaml not found. Please provide model_path explicitly.")
+        
         model_dict = OmegaConf.select(
-            cls.model_info,
+            model_info,
             f"{file_info.engine_type.value}.{file_info.ocr_version.value}.{file_info.task_type.value}",
         )
 

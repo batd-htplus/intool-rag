@@ -59,10 +59,11 @@ async def shutdown_event():
 class QueryRequest(BaseModel):
     question: str
     filters: Optional[Dict[str, Any]] = None
-    temperature: float = 0.7
+    temperature: float = 0.0  # Deterministic output - no randomness
     max_tokens: Optional[int] = None
     stream: bool = False
     include_sources: bool = True
+    include_prompt: bool = False
 
 @app.get("/health")
 async def health():
@@ -126,14 +127,20 @@ async def query(request: QueryRequest):
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             include_sources=request.include_sources,
+            include_prompt=request.include_prompt,
         )
         
-        return {
+        response = {
             "answer": result.get("answer", ""),
             "sources": result.get("sources", []),
             "query_id": str(uuid.uuid4()),
             "timestamp": int(time.time()),
         }
+        
+        if request.include_prompt:
+            response["prompt"] = result.get("prompt", "")
+        
+        return response
     except EmbeddingError as e:
         logger.error(f"Embedding error: {str(e)}")
         raise HTTPException(status_code=503, detail=f"Embedding service error: {str(e)}")
@@ -164,7 +171,7 @@ async def ingest(
         file: Document file
         project: Project identifier
         language: Document language
-        async_mode: If True, process in background; if False, process synchronously
+        async_mode: If True, process in background and return immediately; if False, process synchronously
     """
     try:
         upload_dir = Path("/storage/uploads")
@@ -176,22 +183,58 @@ async def ingest(
             content = await file.read()
             await f.write(content)
         
+        # Generate doc_id early for async mode
+        doc_id = str(uuid.uuid4())
         
-        result = await pipeline.ingest_document(
-            filepath=str(file_path),
-            project=project,
-            language=language,
-            async_mode=async_mode
-        )
-        
-        if not async_mode:
+        if async_mode:
+            from rag.background_tasks import get_task_queue
+            
+            async def background_ingest():
+                try:
+                    result = await pipeline.ingest_document(
+                        filepath=str(file_path),
+                        project=project,
+                        language=language,
+                        doc_id=doc_id,
+                        async_mode=False
+                    )
+                    logger.info(f"Background ingestion completed: {result}")
+                except Exception as e:
+                    logger.error(f"Background ingestion failed: {str(e)}", exc_info=True)
+                finally:
+                    # Clean up file after processing
+                    try:
+                        if file_path.exists():
+                            os.remove(file_path)
+                    except OSError as e:
+                        logger.warning(f"Could not remove temporary file {file_path}: {e}")
+            
+            task_queue = get_task_queue()
+            await task_queue.enqueue(background_ingest)
+            
+            return {
+                "doc_id": doc_id,
+                "status": "queued",
+                "message": "Document queued for background processing"
+            }
+        else:
+            # Synchronous processing
+            result = await pipeline.ingest_document(
+                filepath=str(file_path),
+                project=project,
+                language=language,
+                doc_id=doc_id,
+                async_mode=False
+            )
+            
+            # Clean up file after processing
             try:
                 if file_path.exists():
                     os.remove(file_path)
             except OSError as e:
                 logger.warning(f"Could not remove temporary file {file_path}: {e}")
-        
-        return result
+            
+            return result
     except EmbeddingError as e:
         logger.error(f"Embedding error during ingestion: {str(e)}")
         raise HTTPException(status_code=503, detail=f"Embedding service error: {str(e)}")

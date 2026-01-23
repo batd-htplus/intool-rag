@@ -21,6 +21,7 @@ class KeywordScorer:
         self.min_len = 3
 
     def extract_keywords(self, query: str) -> List[str]:
+        """Extract keywords from query for scoring."""
         query = clean_text_multilang(query).lower()
         tokens = re.findall(r'\w+', query)
         return [t for t in tokens if len(t) >= self.min_len]
@@ -41,6 +42,51 @@ class KeywordScorer:
 
         return hits / len(keywords)
 
+def _is_structured_data_chunk(metadata: dict) -> bool:
+    """
+    Check if chunk contains structured data.
+    
+    Args:
+        metadata: Chunk metadata
+        
+    Returns:
+        True if chunk contains structured data
+    """
+    if not metadata:
+        return False
+    return (
+        metadata.get("has_table", False) or
+        metadata.get("doc_type") == "table" or
+        metadata.get("has_list", False) or
+        metadata.get("doc_type") == "list"
+    )
+
+
+def _apply_structured_data_boost(
+    score: float,
+    metadata: dict,
+    base_multiplier: float = None
+) -> float:
+    """
+    Apply boost to structured data chunks.
+    
+    Structured data chunks often have lower semantic similarity
+    but higher factual value, so they need score boosting.
+    
+    Args:
+        score: Original score
+        metadata: Chunk metadata
+        base_multiplier: Base boost multiplier (from config)
+        
+    Returns:
+        Boosted score
+    """
+    if not _is_structured_data_chunk(metadata):
+        return score
+    
+    multiplier = base_multiplier or config.TABLE_BOOST_MULTIPLIER
+    return score * multiplier
+
 
 # =====================================================
 # Hybrid Retriever
@@ -51,6 +97,7 @@ class HybridRetriever:
     Precision-first hybrid retriever:
     - Vector search (primary)
     - Keyword score (noise filter / light boost)
+    - Structured data boost (configurable)
     - Optional reranker (OFF by default)
     """
 
@@ -61,13 +108,15 @@ class HybridRetriever:
         self._reranker = None
 
     def _get_reranker(self):
+        """Get reranker from DI container (optimized - reuse shared instance)"""
         if not config.RERANKER_ENABLED:
             return None
 
         if self._reranker is None:
             try:
-                from rag.providers.reranker_provider import HTTPRerankerProvider
-                self._reranker = HTTPRerankerProvider()
+                from rag.core.container import get_container
+                container = get_container()
+                self._reranker = container.get_reranker_provider()
             except Exception as e:
                 logger.warning(f"Reranker disabled: {e}")
                 self._reranker = False
@@ -81,14 +130,23 @@ class HybridRetriever:
         filters: Optional[Dict[str, Any]] = None,
         top_k: Optional[int] = None
     ) -> List[Dict[str, Any]]:
+        """
+        Perform hybrid search with structured data boost.
+        
+        Args:
+            query: Query text
+            vector_embedding: Query vector embedding
+            filters: Optional filters
+            top_k: Number of results to return
+            
+        Returns:
+            List of search results with scores and metadata
+        """
         top_k = top_k or config.RETRIEVAL_TOP_K
 
         if not query or not vector_embedding:
             return []
 
-        # =================================================
-        # Step 1: Vector search (recall)
-        # =================================================
         candidate_k = max(top_k * 2, 10)
 
         vector_results = await vector_store.search(
@@ -100,9 +158,7 @@ class HybridRetriever:
         if not vector_results:
             return []
 
-        # =================================================
-        # Step 2: Keyword scoring (noise reduction)
-        # =================================================
+        # Keyword scoring (noise reduction)
         keywords = self.keyword_scorer.extract_keywords(query)
 
         combined = []
@@ -110,7 +166,8 @@ class HybridRetriever:
             payload = r.payload if isinstance(r.payload, dict) else {}
             text = payload.get("text", "")
             vec_score = r.score
-            meta = payload
+            
+            meta = {k: v for k, v in payload.items() if k != "text"}
 
             kw_score = self.keyword_scorer.score(text, keywords)
 
@@ -118,10 +175,14 @@ class HybridRetriever:
             if kw_score == 0.0 and vec_score < config.RETRIEVAL_MIN_SCORE:
                 continue
 
+            # Calculate combined score
             combined_score = (
                 self.vector_weight * vec_score +
                 self.keyword_weight * kw_score
             )
+            
+            # Apply structured data boost
+            combined_score = _apply_structured_data_boost(combined_score, meta)
 
             combined.append({
                 "text": text,
@@ -137,9 +198,7 @@ class HybridRetriever:
         combined.sort(key=lambda x: x["score"], reverse=True)
         combined = combined[:top_k]
 
-        # =================================================
-        # Step 3: Optional reranker (LAST RESORT)
-        # =================================================
+        # Optional reranker (LAST RESORT)
         reranker = self._get_reranker()
         if reranker and len(combined) > 1:
             try:

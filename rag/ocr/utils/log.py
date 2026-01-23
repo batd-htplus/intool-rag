@@ -3,7 +3,12 @@
 # @Contact: liekkaskono@163.com
 import logging
 
-import colorlog
+try:
+    import colorlog
+    HAS_COLORLOG = True
+except ImportError:
+    HAS_COLORLOG = False
+    colorlog = None
 
 
 class Logger:
@@ -12,16 +17,21 @@ class Logger:
         self.logger.setLevel(log_level)
         self.logger.propagate = False
 
-        formatter = colorlog.ColoredFormatter(
-            "%(log_color)s[%(levelname)s] %(asctime)s [RapidOCR] %(filename)s:%(lineno)d: %(message)s",
-            log_colors={
-                "DEBUG": "cyan",
-                "INFO": "green",
-                "WARNING": "yellow",
-                "ERROR": "red",
-                "CRITICAL": "red,bg_white",
-            },
-        )
+        if HAS_COLORLOG:
+            formatter = colorlog.ColoredFormatter(
+                "%(log_color)s[%(levelname)s] %(asctime)s [RapidOCR] %(filename)s:%(lineno)d: %(message)s",
+                log_colors={
+                    "DEBUG": "cyan",
+                    "INFO": "green",
+                    "WARNING": "yellow",
+                    "ERROR": "red",
+                    "CRITICAL": "red,bg_white",
+                },
+            )
+        else:
+            formatter = logging.Formatter(
+                "[%(levelname)s] %(asctime)s [RapidOCR] %(filename)s:%(lineno)d: %(message)s"
+            )
 
         if not self.logger.handlers:
             console_handler = logging.StreamHandler()

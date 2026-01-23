@@ -22,25 +22,31 @@ class TorchInferSession(InferSession):
 
         model_path = cfg.get("model_path", None)
         if model_path is None:
-            model_info = self.get_model_url(
-                FileInfo(
-                    engine_type=cfg.engine_type,
-                    ocr_version=cfg.ocr_version,
-                    task_type=cfg.task_type,
-                    lang_type=cfg.lang_type,
-                    model_type=cfg.model_type,
+            try:
+                model_info = self.get_model_url(
+                    FileInfo(
+                        engine_type=cfg.engine_type,
+                        ocr_version=cfg.ocr_version,
+                        task_type=cfg.task_type,
+                        lang_type=cfg.lang_type,
+                        model_type=cfg.model_type,
+                    )
                 )
-            )
-            default_model_url = model_info["model_dir"]
-            model_path = self.DEFAULT_MODEL_PATH / Path(default_model_url).name
-            DownloadFile.run(
-                DownloadFileInput(
-                    file_url=default_model_url,
-                    sha256=model_info["SHA256"],
-                    save_path=model_path,
-                    logger=self.logger,
+                default_model_url = model_info["model_dir"]
+                model_path = self.DEFAULT_MODEL_PATH / Path(default_model_url).name
+                DownloadFile.run(
+                    DownloadFileInput(
+                        file_url=default_model_url,
+                        sha256=model_info["SHA256"],
+                        save_path=model_path,
+                        logger=self.logger,
+                    )
                 )
-            )
+            except (ValueError, KeyError) as e:
+                raise ValueError(
+                    f"model_path not provided and default_models.yaml not available. "
+                    f"Please provide model_path explicitly. Error: {e}"
+                )
 
         self.logger.info(f"Using {model_path}")
         model_path = Path(model_path)

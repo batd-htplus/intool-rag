@@ -4,50 +4,24 @@ from typing import List, Optional, Dict, Any
 import httpx
 from rag.config import config
 from rag.logging import logger
-from rag.core.exceptions import RerankerError, ProviderConnectionError, ProviderTimeoutError
+from rag.core.exceptions import RerankerError
 from .base import RerankerProvider
+from .http_utils import get_shared_http_client, http_request_with_retry
 
 
 class HTTPRerankerProvider(RerankerProvider):
-    """Reranker provider that uses HTTP calls to model service.
-    
-    Can use either:
-    1. Shared HTTP client (recommended for DI) - via DI container
-    2. Own HTTP client (standalone mode) - creates new client
-    """
+    """Reranker provider that uses HTTP calls to model service with connection pooling and retry logic."""
 
     def __init__(
         self,
         model_name: Optional[str] = None,
         base_url: Optional[str] = None,
         http_client: Optional[httpx.AsyncClient] = None,
-        max_retries: Optional[int] = None,
-        retry_delay: Optional[float] = None
     ):
-        """
-        Initialize HTTP reranker provider.
-        
-        Args:
-            model_name: Reranker model name
-            base_url: Base URL for reranker service
-            http_client: Optional shared HTTP client (for DI)
-            max_retries: Maximum retry attempts (defaults to config)
-            retry_delay: Base delay between retries in seconds (defaults to config)
-        """
+        """Initialize HTTP reranker provider."""
         self.model_name = model_name or config.RERANKER_MODEL
         self.base_url = base_url or config.MODEL_SERVICE_URL
-        self.client = http_client or httpx.AsyncClient(
-            timeout=httpx.Timeout(
-                config.HTTP_READ_TIMEOUT,
-                connect=config.HTTP_CONNECT_TIMEOUT,
-                read=config.HTTP_READ_TIMEOUT,
-                write=config.HTTP_WRITE_TIMEOUT,
-                pool=config.HTTP_POOL_TIMEOUT
-            )
-        )
-        self._owns_client = http_client is None
-        self.max_retries = max_retries or config.HTTP_MAX_RETRIES
-        self.retry_delay = retry_delay or config.HTTP_RETRY_DELAY
+        self.client = http_client or get_shared_http_client()
 
     async def rerank(
         self,
@@ -55,22 +29,7 @@ class HTTPRerankerProvider(RerankerProvider):
         documents: List[str],
         top_k: Optional[int] = None,
     ) -> List[tuple]:
-        """
-        Rerank documents based on relevance to query.
-        
-        Args:
-            query: Search query text
-            documents: List of document texts to rerank
-            top_k: Maximum number of results to return (None = all)
-            
-        Returns:
-            List of (index, score) tuples sorted by score (descending)
-            
-        Raises:
-            ValueError: If query or documents are empty
-            ProviderTimeoutError: If request times out
-            RerankerError: For other errors
-        """
+        """Rerank documents based on relevance to query with retry logic"""
         if not query or not query.strip():
             raise ValueError("Query cannot be empty")
         if not documents:
@@ -82,7 +41,33 @@ class HTTPRerankerProvider(RerankerProvider):
             "documents": documents,
         }
 
-        return await self._rerank_with_retry(payload, top_k, retry_count=0)
+        try:
+            result = await http_request_with_retry(
+                self.client,
+                f"{self.base_url}/v1/rerank",
+                payload,
+                service_name="Reranker",
+            )
+
+            # Expected format: {"results": [{"index": 0, "score": 0.95}, ...]}
+            if "results" in result:
+                ranked = sorted(
+                    result["results"],
+                    key=lambda x: x.get("score", 0),
+                    reverse=True,
+                )
+                if top_k:
+                    ranked = ranked[:top_k]
+                return [(r["index"], r["score"]) for r in ranked]
+
+            logger.warning(f"Unexpected rerank response format: {result}")
+            return []
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.debug("Reranker endpoint not found, returning empty results")
+                return []
+            logger.error(f"Reranking HTTP error {e.response.status_code}: {str(e)}")
+            raise RerankerError(f"Reranking service error: {e.response.status_code}")
     
     async def _rerank_with_retry(
         self,
@@ -142,6 +127,5 @@ class HTTPRerankerProvider(RerankerProvider):
             raise RerankerError(f"Unexpected error: {str(e)}")
 
     async def close(self):
-        """Close HTTP client (only if we own it, otherwise managed by DI container)."""
-        if self._owns_client:
-            await self.client.aclose()
+        """Close HTTP client"""
+        pass

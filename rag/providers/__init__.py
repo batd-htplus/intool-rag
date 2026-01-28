@@ -8,15 +8,15 @@ from .base import (
     LLMProvider,
     RerankerProvider,
 )
-from .embedding_provider import HTTPEmbeddingProvider
-from .llm_provider import HTTPLLMProvider
+from .embedding_provider import LocalEmbeddingProvider
+from .llm_provider import LocalLLMProvider
 from .reranker_provider import HTTPRerankerProvider
 
 __all__ = [
     "EmbeddingProvider",
     "LLMProvider",
     "RerankerProvider",
-    "HTTPEmbeddingProvider",
-    "HTTPLLMProvider",
+    "LocalEmbeddingProvider",
+    "LocalLLMProvider",
     "HTTPRerankerProvider",
 ]

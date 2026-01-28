@@ -5,8 +5,8 @@ import httpx
 from rag.config import config
 from rag.logging import logger
 from rag.providers.base import EmbeddingProvider, LLMProvider, RerankerProvider
-from rag.providers.embedding_provider import HTTPEmbeddingProvider
-from rag.providers.llm_provider import HTTPLLMProvider
+from rag.providers.embedding_provider import LocalEmbeddingProvider
+from rag.providers.llm_provider import LocalLLMProvider
 from rag.providers.reranker_provider import HTTPRerankerProvider
 
 class Container:
@@ -64,37 +64,30 @@ class Container:
         """Get embedding provider instance (lazy loaded, singleton).
         
         Args:
-            provider_type: Type of provider ("http", "openai", "local"). 
-                         Defaults to config.EMBEDDING_PROVIDER_TYPE
-            **kwargs: Additional configuration options
+            provider_type: Type of provider ("local", "http").
+                         Defaults to "local" (in-process LLM service)
+            **kwargs: Additional configuration options (ignored for local)
         
         Returns:
             EmbeddingProvider instance
         
         Examples:
-            # Use default HTTP provider
+            # Use local embedding provider (default)
             provider = container.get_embedding_provider()
             
-            # Use specific provider
-            provider = container.get_embedding_provider("http")
-            
-            # With custom base URL
-            provider = container.get_embedding_provider(base_url="http://localhost:8002")
+            # Local in-process embeddings
+            provider = container.get_embedding_provider("local")
         """
-        provider_type = provider_type or config.EMBEDDING_PROVIDER_TYPE
+        provider_type = provider_type or "local"
         
-        # Generate stable config key (sorted kwargs for consistency)
+        # Generate stable config key
         sorted_kwargs = tuple(sorted(kwargs.items())) if kwargs else ()
         config_key = f"embedding_{provider_type}_{sorted_kwargs}"
         if self._embedding_provider and self._provider_configs.get("embedding") == config_key:
             return self._embedding_provider
         
-        if provider_type == "http":
-            base_url = kwargs.get("base_url", config.MODEL_SERVICE_URL)
-            self._embedding_provider = HTTPEmbeddingProvider(
-                base_url=base_url,
-                http_client=self.get_http_client()
-            )
+        if provider_type == "local":
+            self._embedding_provider = LocalEmbeddingProvider()
         else:
             raise ValueError(f"Unknown embedding provider type: {provider_type}")
         
@@ -109,34 +102,29 @@ class Container:
         """Get LLM provider instance (lazy loaded, singleton).
         
         Args:
-            provider_type: Type of provider ("http", "openai", "local").
-                         Defaults to config.LLM_PROVIDER_TYPE
-            **kwargs: Additional configuration options
+            provider_type: Type of provider ("local", "http").
+                         Defaults to "local" (in-process LLM service)
+            **kwargs: Additional configuration options (ignored for local)
         
         Returns:
             LLMProvider instance
         
         Examples:
-            # Use default HTTP provider
+            # Use local LLM provider (default, no external services)
             provider = container.get_llm_provider()
             
-            # Use specific provider
-            provider = container.get_llm_provider("http")
+            # Local in-process LLM (Ollama or HuggingFace)
+            provider = container.get_llm_provider("local")
         """
-        provider_type = provider_type or config.LLM_PROVIDER_TYPE
+        provider_type = provider_type or "local"
         
-        # Generate stable config key (sorted kwargs for consistency)
         sorted_kwargs = tuple(sorted(kwargs.items())) if kwargs else ()
         config_key = f"llm_{provider_type}_{sorted_kwargs}"
         if self._llm_provider and self._provider_configs.get("llm") == config_key:
             return self._llm_provider
         
-        if provider_type == "http":
-            base_url = kwargs.get("base_url", config.MODEL_SERVICE_URL)
-            self._llm_provider = HTTPLLMProvider(
-                base_url=base_url,
-                http_client=self.get_http_client()
-            )
+        if provider_type == "local":
+            self._llm_provider = LocalLLMProvider()
         else:
             raise ValueError(f"Unknown LLM provider type: {provider_type}")
         
@@ -171,7 +159,6 @@ class Container:
         
         provider_type = provider_type or config.RERANKER_PROVIDER_TYPE
         
-        # Generate stable config key (sorted kwargs for consistency)
         sorted_kwargs = tuple(sorted(kwargs.items())) if kwargs else ()
         config_key = f"reranker_{provider_type}_{sorted_kwargs}"
         if self._reranker_provider and self._provider_configs.get("reranker") == config_key:

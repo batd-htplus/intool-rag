@@ -272,7 +272,6 @@ class VisRes:
 
     @staticmethod
     def get_char_size(font, char_str: str) -> float:
-        # compatible with Pillow v9 and v10.
         if hasattr(font, "getsize"):
             get_size_func = getattr(font, "getsize")
             return get_size_func(char_str)[1]

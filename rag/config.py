@@ -4,8 +4,6 @@ from pathlib import Path
 class Config:
     """RAG service configuration"""
     
-    MODEL_SERVICE_URL = os.getenv("MODEL_SERVICE_URL", "http://ai-service:8002")
-    
     EMBEDDING_PROVIDER_TYPE = os.getenv("EMBEDDING_PROVIDER_TYPE", "http")
     LLM_PROVIDER_TYPE = os.getenv("LLM_PROVIDER_TYPE", "http")
     RERANKER_PROVIDER_TYPE = os.getenv("RERANKER_PROVIDER_TYPE", "http")
@@ -29,21 +27,14 @@ class Config:
     RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
     RERANKER_TOP_K = int(os.getenv("RERANKER_TOP_K", "10"))
     
-    # Vector Store
-    QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-    QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
-    QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "documents")
-    QDRANT_TIMEOUT = int(os.getenv("QDRANT_TIMEOUT", "30"))
+    # Vector Dimension
     VECTOR_DIMENSION = int(os.getenv("VECTOR_DIMENSION", "1024"))
-    
-    # Qdrant HNSW optimization
-    QDRANT_HNSW_M = int(os.getenv("QDRANT_HNSW_M", "16"))
-    QDRANT_HNSW_EF_CONSTRUCT = int(os.getenv("QDRANT_HNSW_EF_CONSTRUCT", "200"))
-    QDRANT_HNSW_EF_SEARCH = int(os.getenv("QDRANT_HNSW_EF_SEARCH", "100"))
     
     # Chunking strategy
     CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "512"))
     CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
+    CHUNK_MAX_SIZE = int(os.getenv("CHUNK_MAX_SIZE", "512"))
+    CHUNK_MIN_SIZE = int(os.getenv("CHUNK_MIN_SIZE", "50"))
     SEMANTIC_CHUNKING = os.getenv("SEMANTIC_CHUNKING", "false").lower() == "true"
     MAX_CHUNK_CHAR = int(os.getenv("MAX_CHUNK_CHAR", "2000"))
     

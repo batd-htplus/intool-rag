@@ -186,10 +186,6 @@ config.local.py
 secrets.yaml
 secrets.yml
 
-# Qdrant data
-qdrant_data/
-qdrant_storage/
-
 # Vector store data
 vector_store_data/
 *.index

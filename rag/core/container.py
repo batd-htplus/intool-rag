@@ -4,21 +4,20 @@ from typing import Optional, Dict, Any
 import httpx
 from rag.config import config
 from rag.logging import logger
-from rag.providers.base import EmbeddingProvider, LLMProvider, RerankerProvider
-from rag.providers.embedding_provider import LocalEmbeddingProvider
-from rag.providers.llm_provider import LocalLLMProvider
-from rag.providers.reranker_provider import HTTPRerankerProvider
+from rag.providers.base import LLMProvider
+
 
 class Container:
     """Central dependency injection container for RAG system.
     
     Manages creation and lifecycle of:
-    - HTTP client with connection pooling
-    - Provider instances (embedding, LLM, reranker)
-    - Caching layers
+    - HTTP client with connection pooling (for LLM calls)
+    - LLM provider instance
+    
+    IMPORTANT: Embeddings are handled by embedding_service.py, NOT container
     
     Benefits:
-    - Single HTTP client for all providers (connection pooling)
+    - Single HTTP client for all requests (connection pooling)
     - Lazy initialization (load on first use)
     - Centralized dependency management
     - Easy to mock for testing
@@ -26,9 +25,7 @@ class Container:
     
     def __init__(self):
         self._http_client: Optional[httpx.AsyncClient] = None
-        self._embedding_provider: Optional[EmbeddingProvider] = None
         self._llm_provider: Optional[LLMProvider] = None
-        self._reranker_provider: Optional[RerankerProvider] = None
         self._provider_configs: Dict[str, Any] = {}
     
     def get_http_client(self) -> httpx.AsyncClient:
@@ -38,7 +35,7 @@ class Container:
         - max_connections=100: Max total connections
         - max_keepalive_connections=20: Max persistent connections per host
         
-        All providers use this single client → better resource utilization
+        All HTTP-based providers use this single client → better resource utilization
         """
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(
@@ -56,44 +53,6 @@ class Container:
             )
         return self._http_client
     
-    def get_embedding_provider(
-        self,
-        provider_type: Optional[str] = None,
-        **kwargs
-    ) -> EmbeddingProvider:
-        """Get embedding provider instance (lazy loaded, singleton).
-        
-        Args:
-            provider_type: Type of provider ("local", "http").
-                         Defaults to "local" (in-process LLM service)
-            **kwargs: Additional configuration options (ignored for local)
-        
-        Returns:
-            EmbeddingProvider instance
-        
-        Examples:
-            # Use local embedding provider (default)
-            provider = container.get_embedding_provider()
-            
-            # Local in-process embeddings
-            provider = container.get_embedding_provider("local")
-        """
-        provider_type = provider_type or "local"
-        
-        # Generate stable config key
-        sorted_kwargs = tuple(sorted(kwargs.items())) if kwargs else ()
-        config_key = f"embedding_{provider_type}_{sorted_kwargs}"
-        if self._embedding_provider and self._provider_configs.get("embedding") == config_key:
-            return self._embedding_provider
-        
-        if provider_type == "local":
-            self._embedding_provider = LocalEmbeddingProvider()
-        else:
-            raise ValueError(f"Unknown embedding provider type: {provider_type}")
-        
-        self._provider_configs["embedding"] = config_key
-        return self._embedding_provider
-    
     def get_llm_provider(
         self,
         provider_type: Optional[str] = None,
@@ -102,19 +61,16 @@ class Container:
         """Get LLM provider instance (lazy loaded, singleton).
         
         Args:
-            provider_type: Type of provider ("local", "http").
-                         Defaults to "local" (in-process LLM service)
+            provider_type: Type of provider ("local").
+                         Defaults to "local" (Ollama or HuggingFace backend)
             **kwargs: Additional configuration options (ignored for local)
         
         Returns:
             LLMProvider instance
         
         Examples:
-            # Use local LLM provider (default, no external services)
+            # Get LLM provider (configured in .env)
             provider = container.get_llm_provider()
-            
-            # Local in-process LLM (Ollama or HuggingFace)
-            provider = container.get_llm_provider("local")
         """
         provider_type = provider_type or "local"
         
@@ -124,6 +80,7 @@ class Container:
             return self._llm_provider
         
         if provider_type == "local":
+            from rag.providers.llm_provider import LocalLLMProvider
             self._llm_provider = LocalLLMProvider()
         else:
             raise ValueError(f"Unknown LLM provider type: {provider_type}")
@@ -131,75 +88,22 @@ class Container:
         self._provider_configs["llm"] = config_key
         return self._llm_provider
     
-    def get_reranker_provider(
-        self,
-        provider_type: Optional[str] = None,
-        **kwargs
-    ) -> Optional[RerankerProvider]:
-        """Get reranker provider instance (lazy loaded, singleton).
-        
-        Args:
-            provider_type: Type of provider ("http", "local").
-                         Defaults to config.RERANKER_PROVIDER_TYPE
-            **kwargs: Additional configuration options
-        
-        Returns:
-            RerankerProvider instance or None if reranking disabled
-        
-        Examples:
-            # Use configured reranker
-            provider = container.get_reranker_provider()
-            
-            # Get None if reranking disabled
-            if not config.RERANKER_ENABLED:
-                provider = None
-        """
-        if not config.RERANKER_ENABLED:
-            return None
-        
-        provider_type = provider_type or config.RERANKER_PROVIDER_TYPE
-        
-        sorted_kwargs = tuple(sorted(kwargs.items())) if kwargs else ()
-        config_key = f"reranker_{provider_type}_{sorted_kwargs}"
-        if self._reranker_provider and self._provider_configs.get("reranker") == config_key:
-            return self._reranker_provider
-        
-        if provider_type == "http":
-            base_url = kwargs.get("base_url", config.MODEL_SERVICE_URL)
-            self._reranker_provider = HTTPRerankerProvider(
-                base_url=base_url,
-                http_client=self.get_http_client()
-            )
-        else:
-            raise ValueError(f"Unknown reranker provider type: {provider_type}")
-        
-        self._provider_configs["reranker"] = config_key
-        return self._reranker_provider
-    
     async def shutdown(self):
         """Shutdown container and close all resources.
         
         Called at application shutdown to:
         - Close HTTP client connections
-        - Close provider connections
+        - Close LLM provider connections
         - Release resources
         """
         if self._http_client:
             await self._http_client.aclose()
             self._http_client = None
         
-        if self._embedding_provider and hasattr(self._embedding_provider, "close"):
-            await self._embedding_provider.close()
-        
         if self._llm_provider and hasattr(self._llm_provider, "close"):
             await self._llm_provider.close()
         
-        if self._reranker_provider and hasattr(self._reranker_provider, "close"):
-            await self._reranker_provider.close()
-        
-        self._embedding_provider = None
         self._llm_provider = None
-        self._reranker_provider = None
         self._provider_configs = {}
 
 
@@ -214,7 +118,7 @@ def get_container() -> Container:
     
     Usage:
         container = get_container()
-        embedding_provider = container.get_embedding_provider()
+        llm_provider = container.get_llm_provider()
     """
     global _global_container
     if _global_container is None:

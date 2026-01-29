@@ -1,107 +1,87 @@
 """
-LangChain Embeddings Wrapper
-=============================
+HuggingFace Embeddings Wrapper (Fallback)
+==========================================
 
-Wraps LangChain embeddings for use with our provider system.
+Local embeddings provider using HuggingFace models.
+No external API keys needed - all computation is local.
 
-Allows swapping embedding implementations:
-- OpenAI Embeddings
-- HuggingFace (local)
-- Cohere
-- Others
+IMPORTANT: This is a FALLBACK provider.
+Primary: Gemini embeddings (semantic consistency with LLM structure analysis)
+Fallback: HuggingFace (if Gemini unavailable or for offline-only setups)
 
-Complies with EmbeddingProvider interface.
+Models:
+- BAAI/bge-small-en-v1.5 (384 dims, lightweight, recommended)
+- BAAI/bge-base-en-v1.5 (768 dims, better quality)
+
+When HuggingFace is used:
+- BUILD: Embed semantic node contents (after LLM structure analysis)
+- QUERY: Embed user query for FAISS search
 """
 
 from typing import List, Optional
-import os
+from rag.logging import logger
 
 try:
-    from langchain_community.embeddings import OpenAIEmbeddings
-    from langchain.embeddings.huggingface import HuggingFaceEmbeddings
+    from langchain_community.embeddings import HuggingFaceEmbeddings
     HAS_LANGCHAIN = True
 except ImportError:
     HAS_LANGCHAIN = False
 
-from rag.logging import logger
-from rag.config import config
 from rag.providers.base import EmbeddingProvider
 
-class LangChainEmbeddingWrapper(EmbeddingProvider):
+
+class HuggingFaceEmbeddingProvider(EmbeddingProvider):
     """
-    Wraps LangChain embeddings to comply with our EmbeddingProvider interface.
+    Local HuggingFace embeddings - no API keys needed.
+    
+    Recommended for:
+    - BUILD phase: Embed documents offline
+    - QUERY phase: Embed queries for FAISS search
     
     Supports:
-    - OpenAI Embeddings (via API key)
-    - HuggingFace Embeddings (local)
+    - BAAI/bge-small-en-v1.5 (384 dims, default)
+    - BAAI/bge-base-en-v1.5 (768 dims, better quality)
     """
     
     def __init__(
         self,
-        embedding_type: str = "openai",
-        **kwargs
+        model_name: str = "BAAI/bge-small-en-v1.5",
     ):
         """
-        Initialize LangChain embeddings.
+        Initialize HuggingFace embeddings.
         
         Args:
-            embedding_type: "openai" or "huggingface"
-            **kwargs: Additional args for embedding model
+            model_name: HuggingFace model ID
         """
         if not HAS_LANGCHAIN:
             raise RuntimeError(
-                "LangChain not installed: pip install langchain"
+                "LangChain not installed: pip install langchain-community"
             )
         
-        self.embedding_type = embedding_type
+        self.model_name = model_name
         self.embeddings = None
         self.dimension = None
         
-        self._init_embeddings(**kwargs)
+        self._init_embeddings()
     
-    def _init_embeddings(self, **kwargs):
-        """Initialize selected embedding model"""
-        if self.embedding_type == "openai":
-            self._init_openai(**kwargs)
-        elif self.embedding_type == "huggingface":
-            self._init_huggingface(**kwargs)
-        else:
-            raise ValueError(f"Unknown embedding type: {self.embedding_type}")
-    
-    def _init_openai(self, **kwargs):
-        """Initialize OpenAI embeddings"""
-        api_key = kwargs.get("api_key") or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY not set")
-        
-        model = kwargs.get("model", "text-embedding-3-small")
-        
-        self.embeddings = OpenAIEmbeddings(
-            api_key=api_key,
-            model=model,
-        )
-        
-        if "3-small" in model:
-            self.dimension = 1536
-        elif "3-large" in model:
-            self.dimension = 3072
-        else:
-            self.dimension = 1536  # default
-        
-        logger.info(f"Initialized OpenAI embeddings: {model} (dim={self.dimension})")
-    
-    def _init_huggingface(self, **kwargs):
+    def _init_embeddings(self):
         """Initialize HuggingFace embeddings"""
-        model_name = kwargs.get("model_name", "BAAI/bge-small-en-v1.5")
+        logger.info(f"[EMBED] Loading HuggingFace model: {self.model_name}")
         
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=model_name,
-            encode_kwargs={"normalize_embeddings": True},
-        )
-        
-        self.dimension = len(self.embeddings.embed_query("test"))
-        
-        logger.info(f"Initialized HuggingFace embeddings: {model_name} (dim={self.dimension})")
+        try:
+            self.embeddings = HuggingFaceEmbeddings(
+                model_name=self.model_name,
+                encode_kwargs={"normalize_embeddings": True},
+            )
+            
+            test_embedding = self.embeddings.embed_query("test")
+            self.dimension = len(test_embedding)
+            
+            logger.info(f"[EMBED] ✓ HuggingFace ready (dim={self.dimension})")
+            
+        except Exception as e:
+            logger.error(f"[EMBED] Failed to initialize HuggingFace: {e}")
+            raise
     
     async def embed_single(
         self,
@@ -113,22 +93,22 @@ class LangChainEmbeddingWrapper(EmbeddingProvider):
         
         Args:
             text: Text to embed
-            instruction: Optional instruction (used by some models)
+            instruction: Optional instruction (ignored for HuggingFace)
             
         Returns:
-            Embedding vector
+            Embedding vector (list of floats)
         """
         if not self.embeddings:
             raise RuntimeError("Embeddings not initialized")
         
-        if instruction:
-            text = f"{instruction}\n{text}"
+        if not text or not text.strip():
+            return [0.0] * self.dimension
         
         try:
-            embedding = self.embeddings.embed_query(text)
+            embedding = self.embeddings.embed_query(text.strip())
             return embedding
         except Exception as e:
-            logger.error(f"Embedding failed: {e}")
+            logger.error(f"[EMBED] Single embedding failed: {e}")
             raise
     
     async def embed_batch(
@@ -142,8 +122,8 @@ class LangChainEmbeddingWrapper(EmbeddingProvider):
         
         Args:
             texts: List of texts to embed
-            instruction: Optional instruction
-            batch_size: Batch size for processing
+            instruction: Optional instruction (ignored for HuggingFace)
+            batch_size: Batch size for processing (advisory, HF handles internally)
             
         Returns:
             List of embedding vectors
@@ -151,14 +131,14 @@ class LangChainEmbeddingWrapper(EmbeddingProvider):
         if not self.embeddings:
             raise RuntimeError("Embeddings not initialized")
         
-        if instruction:
-            texts = [f"{instruction}\n{text}" for text in texts]
+        if not texts:
+            return []
         
         try:
             embeddings = self.embeddings.embed_documents(texts)
             return embeddings
         except Exception as e:
-            logger.error(f"Batch embedding failed: {e}")
+            logger.error(f"[EMBED] Batch embedding failed: {e}")
             raise
     
     def get_dimension(self) -> int:
@@ -168,18 +148,16 @@ class LangChainEmbeddingWrapper(EmbeddingProvider):
         return self.dimension
 
 
-def create_langchain_embedding_wrapper(
-    embedding_type: str = "huggingface",
-    **kwargs
-) -> LangChainEmbeddingWrapper:
+def create_huggingface_embedding_provider(
+    model_name: str = "BAAI/bge-small-en-v1.5",
+) -> HuggingFaceEmbeddingProvider:
     """
-    Create LangChain embedding wrapper.
+    Create HuggingFace embedding provider.
     
     Args:
-        embedding_type: "openai" or "huggingface"
-        **kwargs: Model-specific arguments
+        model_name: HuggingFace model ID
         
     Returns:
-        Wrapper instance
+        Initialized provider
     """
-    return LangChainEmbeddingWrapper(embedding_type, **kwargs)
+    return HuggingFaceEmbeddingProvider(model_name)

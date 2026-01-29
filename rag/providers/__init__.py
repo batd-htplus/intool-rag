@@ -1,22 +1,20 @@
 """
 Provider abstraction layer for pluggable models.
-Supports easy switching between different embedding, LLM, and reranker models.
+Supports easy switching between different embedding and LLM models.
 """
 
 from .base import (
     EmbeddingProvider,
     LLMProvider,
-    RerankerProvider,
 )
-from .embedding_provider import LocalEmbeddingProvider
 from .llm_provider import LocalLLMProvider
-from .reranker_provider import HTTPRerankerProvider
+from .gemini_embedding import GeminiEmbeddingProvider
+from .langchain_wrapper import HuggingFaceEmbeddingProvider
 
 __all__ = [
     "EmbeddingProvider",
     "LLMProvider",
-    "RerankerProvider",
-    "LocalEmbeddingProvider",
     "LocalLLMProvider",
-    "HTTPRerankerProvider",
+    "GeminiEmbeddingProvider",
+    "HuggingFaceEmbeddingProvider",
 ]

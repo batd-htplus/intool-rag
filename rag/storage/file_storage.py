@@ -15,11 +15,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import asdict
 
-from rag.core.page_index import PageIndex
-from rag.ingest.page_chunker import PageChunk
 from rag.logging import logger
-
-
+from rag.ingest.schemas import Chunk, PageIndex
 class FileStorageManager:
     """Manage file-based storage for RAG data"""
     
@@ -56,7 +53,6 @@ class FileStorageManager:
         
         data = page_index.to_dict()
         
-        # Save
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         
@@ -90,7 +86,7 @@ class FileStorageManager:
     
     def save_chunks(
         self,
-        chunks: List[PageChunk],
+        chunks: List[Chunk],
         doc_id: Optional[str] = None
     ) -> str:
         """
@@ -109,7 +105,7 @@ class FileStorageManager:
         }
         
         Args:
-            chunks: List of PageChunk objects
+            chunks: List of Chunk objects
             doc_id: Optional document ID for filename
             
         Returns:
@@ -199,11 +195,9 @@ class FileStorageManager:
         
         return chunks
     
-    # ===== FAISS METADATA =====
-    
     def save_faiss_metadata(
         self,
-        chunks: List[PageChunk],
+        chunks: List[Chunk],
         doc_id: Optional[str] = None,
     ) -> str:
         """
@@ -223,7 +217,7 @@ class FileStorageManager:
         }
         
         Args:
-            chunks: List of PageChunk objects
+            chunks: List of Chunk objects
             doc_id: Optional document ID
             
         Returns:
@@ -232,7 +226,6 @@ class FileStorageManager:
         filename = (doc_id or "index") + "_" + self.FAISS_META_FILE
         filepath = self.data_dir / filename
         
-        # Build mappings: faiss_id → chunk_id → page_id
         mapping = {
             chunk.chunk_id: i
             for i, chunk in enumerate(chunks)
@@ -243,7 +236,6 @@ class FileStorageManager:
             for i, chunk in enumerate(chunks)
         }
         
-        # Add page_id mapping for complete ID chain
         page_mapping = {
             str(i): chunk.page
             for i, chunk in enumerate(chunks)
@@ -280,8 +272,6 @@ class FileStorageManager:
         
         with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
-    
-    # ===== CONVENIENCE METHODS =====
     
     def document_exists(self, doc_id: str) -> bool:
         """Check if document data exists"""

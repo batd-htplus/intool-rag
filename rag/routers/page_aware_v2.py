@@ -14,10 +14,17 @@ from typing import Optional, List, Dict, Any
 import uuid
 import tempfile
 from pathlib import Path
+import time
 
-from rag.ingest.page_pipeline import PageAwareIngestPipeline
+from rag.ingest.semantic_tree_builder import SemanticTreeBuilder
 from rag.query.page_retriever import retrieve_and_rank_pages
 from rag.query.page_response import build_rag_prompt, create_page_aware_response
+
+from rag.ingest.page_loader import load_pages
+from rag.ingest.page_normalizer import PageNormalizer
+from rag.ingest.node_aware_chunker import ChunksBuilder
+from rag.ingest.semantic_tree_builder import save_semantic_tree_to_file
+
 from rag.core.container import get_container
 from rag.logging import logger
 
@@ -96,25 +103,48 @@ async def ingest_document(
         Ingestion result with doc_id and chunk count
     """
     doc_id = doc_id or str(uuid.uuid4())
-    
+    start_time = time.time()
+
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = Path(tmpdir) / file.filename
             content = await file.read()
             filepath.write_bytes(content)
-            
-            pipeline = PageAwareIngestPipeline()
-            result = await pipeline.ingest_document(
-                filepath=str(filepath),
-                language=language,
+
+            raw_pages = load_pages(str(filepath))
+            normalizer = PageNormalizer()
+            pages_data = []
+
+            for p in raw_pages:
+                normalized = normalizer.normalize_page(
+                    page=p.page,
+                    raw_text=p.raw_content
+                )
+                if normalized:
+                        pages_data.append(normalized)
+            if not pages_data:
+                raise ValueError("No valid pages after normalization")
+
+            tree_builder = SemanticTreeBuilder()
+            result = await tree_builder.build_tree(
                 doc_id=doc_id,
+                source_filename=file.filename,
+                pages_data=pages_data,
+                language=language,
             )
             
-            logger.info(f"✓ Ingested {file.filename}: {result}")
-            
+            vectors_indexed = result.node_count
+            processing_time = time.time() - start_time
+
             return IngestResponse(
+                success=result.node_count > 0,
+                doc_id=result.doc_id,
+                source_file=result.source_filename,
                 project=project,
-                **result
+                total_pages=result.page_count,
+                total_chunks=result.node_count,
+                vectors_indexed=vectors_indexed,
+                processing_time_seconds=round(processing_time, 3),
             )
     
     except Exception as e:

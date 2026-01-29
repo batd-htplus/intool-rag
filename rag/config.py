@@ -88,4 +88,5 @@ class Config:
     # Ingestion timeout (for large files)
     INGEST_TIMEOUT = float(os.getenv("INGEST_TIMEOUT", "600.0"))  # 10 minutes for large files
 
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyB1rpq40ooQEWeQnihquZFbZg4NjJdf7vI")
 config = Config()

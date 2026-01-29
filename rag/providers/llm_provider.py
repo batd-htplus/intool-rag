@@ -37,7 +37,6 @@ class LocalLLMProvider(LLMProvider):
             )
             
             if not result or not result.strip():
-                logger.warning("Empty LLM response")
                 raise LLMError("LLM returned empty response")
             
             return result
@@ -65,7 +64,6 @@ class LocalLLMProvider(LLMProvider):
                 if chunk:
                     yield chunk
         except Exception as e:
-            logger.error(f"LLM stream error: {e}")
             raise LLMError(f"Failed to generate stream: {str(e)}")
 
     async def close(self):

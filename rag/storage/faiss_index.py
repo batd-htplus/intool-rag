@@ -144,35 +144,26 @@ async def search_faiss_by_vector(
     from rag.storage.file_storage import FileStorageManager
     
     try:
-        # Load FAISS index
         storage_path = Path(config.STORAGE_DIR)
         
-        # Find the first FAISS index file (simplified - should use project filter)
         index_files = list(storage_path.glob("*_faiss.index"))
         if not index_files:
             logger.warning("No FAISS indices found")
             return []
         
-        # Use the first index found (TODO: implement project-based filtering)
         index_path = str(index_files[0])
         
         reader = FAISSIndexReader(index_path)
         search_results = reader.search(query_vector, top_k=limit)
         
-        # Load chunks to map FAISS IDs to chunk data
         storage = FileStorageManager(config.STORAGE_DIR)
-        
-        # Extract doc_id from index filename
         doc_id = index_files[0].stem.replace("_faiss", "")
         
-        # Load chunks (returns dict keyed by chunk_id)
         chunks_dict = storage.load_chunks(doc_id=doc_id)
-        chunks_list = list(chunks_dict.values())  # Convert to list for indexing
+        chunks_list = list(chunks_dict.values())
         
-        # Enrich results with metadata
         enriched_results = []
         for faiss_id, score in search_results:
-            # Find chunk by FAISS ID (or chunk index)
             if faiss_id < len(chunks_list):
                 chunk = chunks_list[faiss_id]
                 enriched_results.append({

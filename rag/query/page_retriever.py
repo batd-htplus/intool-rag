@@ -18,7 +18,7 @@ from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass
 from rag.logging import logger
 from rag.config import config
-from rag.core.container import get_container
+from rag.llm.embedding_service import get_embedding_provider
 from rag.cache import get_query_cache
 
 
@@ -106,7 +106,7 @@ class PageLevelRetriever:
         """
         logger.info(f"Retrieving top-{self.top_chunks} chunks for query")
         
-        embedding_provider = get_container().get_embedding_provider()
+        embedding_provider = get_embedding_provider()
         query_embedding = await embedding_provider.embed_single(query)
         
         from rag.storage.faiss_index import search_faiss_by_vector

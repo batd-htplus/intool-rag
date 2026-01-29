@@ -93,7 +93,6 @@ class TextNormalizer:
         cleaned_lines = []
         
         for line in lines:
-            # Check if line is likely header/footer
             is_header_footer = any(
                 pattern.match(line)
                 for pattern in self.header_footer_regex

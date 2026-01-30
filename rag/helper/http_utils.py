@@ -12,7 +12,6 @@ from rag.core.exceptions import (
 
 T = TypeVar("T")
 
-# Global shared HTTP client
 _shared_http_client: Optional[httpx.AsyncClient] = None
 
 

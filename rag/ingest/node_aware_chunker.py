@@ -73,7 +73,6 @@ class NodeAwareChunker:
         if not text or not text.strip():
             return []
         
-        # Strategy: Split by paragraphs first
         paragraphs = self._split_paragraphs(text)
         
         chunks = []
@@ -85,7 +84,6 @@ class NodeAwareChunker:
         for para in paragraphs:
             para_len = len(para)
             
-            # If adding this paragraph would exceed max, save current chunk
             if current_chunk_text and len(current_chunk_text) + para_len > self.max_chunk_size:
                 if current_chunk_text.strip():
                     chunks.append((
@@ -98,15 +96,13 @@ class NodeAwareChunker:
                 current_chunk_text = ""
                 current_chunk_start = char_pos
             
-            # Add paragraph to current chunk
             if current_chunk_text:
                 current_chunk_text += "\n\n"
-                char_pos += 2  # Account for "\n\n"
+                char_pos += 2
             
             current_chunk_text += para
-            char_pos += para_len + 2  # +2 for trailing spaces
+            char_pos += para_len + 2
         
-        # Save last chunk
         if current_chunk_text.strip():
             chunks.append((
                 current_chunk_text.strip(),
@@ -119,9 +115,7 @@ class NodeAwareChunker:
     
     def _split_paragraphs(self, text: str) -> List[str]:
         """Split text into paragraphs (separated by double newlines)"""
-        # Split by multiple newlines
         paras = re.split(r'\n\s*\n+', text.strip())
-        # Clean up
         return [p.strip() for p in paras if p.strip()]
     
     def _estimate_tokens(self, text: str) -> int:
@@ -172,14 +166,12 @@ class ChunksBuilder:
         chunks = []
         chunk_counter = 0
         
-        # Build map: page → text
         page_texts = {}
         for page_data in pages_data:
             page_num = page_data.get("page", 1)
             text = page_data.get("clean_text", "")
             page_texts[page_num] = text
         
-        # For each node, extract text and chunk it
         for node in page_index.nodes:
             page = node.page_index
             page_text = page_texts.get(page, "")
@@ -188,16 +180,12 @@ class ChunksBuilder:
                 logger.warning(f"No text for node {node.node_id} on page {page}")
                 continue
             
-            # Extract this node's text from the page
-            # (Simple approach: use the entire page text)
-            # TODO: In production, implement proper text extraction per node
             node_text = self._extract_node_text(node, page_text, page_index)
             
             if not node_text or not node_text.strip():
                 logger.debug(f"Empty text for node {node.node_id}")
                 continue
             
-            # Chunk the node text
             chunk_tuples = self.chunker.chunk_node_text(node, node_text)
             
             for chunk_text, char_start, char_end, seq_idx in chunk_tuples:
@@ -212,7 +200,7 @@ class ChunksBuilder:
                     char_end=char_end,
                     seq_index=seq_idx,
                     token_estimate=self.chunker._estimate_tokens(chunk_text),
-                    embedding_id=None,  # Set during embedding phase
+                    embedding_id=None,
                 )
                 
                 chunks.append(chunk)
@@ -244,8 +232,6 @@ class ChunksBuilder:
         
         TODO: Implement proper text extraction based on node boundaries
         """
-        # For now, return full page text
-        # In production, use char_start/char_end from node
         return page_text
     
     def save_chunks(
@@ -275,7 +261,6 @@ class ChunkNodeGrouper:
                 grouped[chunk.node_id] = []
             grouped[chunk.node_id].append(chunk)
         
-        # Sort each group by seq_index
         for node_id in grouped:
             grouped[node_id].sort(key=lambda c: c.seq_index)
         
@@ -300,7 +285,6 @@ class ChunkNodeGrouper:
         Returns:
             Formatted context string
         """
-        # Get chunks for this node
         node_chunks = [c for c in chunks_list if c.node_id == node_id]
         node_chunks.sort(key=lambda c: c.seq_index)
         

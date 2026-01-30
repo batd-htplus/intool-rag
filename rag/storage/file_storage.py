@@ -114,14 +114,12 @@ class FileStorageManager:
         filename = (doc_id or "index") + "_" + self.CHUNKS_FILE
         filepath = self.data_dir / filename
         
-        # Serialize
         chunks_data = [
             {
                 "chunk_id": chunk.chunk_id,
                 "page": chunk.page,
                 "text": chunk.text,
-                "chunk_index": chunk.chunk_index,
-                "metadata": asdict(chunk.metadata),
+                "chunk_index": chunk.seq_index,
             }
             for chunk in chunks
         ]
@@ -131,7 +129,6 @@ class FileStorageManager:
             "chunks": chunks_data,
         }
         
-        # Save
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         
@@ -159,7 +156,6 @@ class FileStorageManager:
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
         
-        # Index by chunk_id for fast lookup
         chunks_by_id = {
             chunk["chunk_id"]: chunk
             for chunk in data.get("chunks", [])

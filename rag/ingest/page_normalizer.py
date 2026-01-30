@@ -25,7 +25,6 @@ class TextNormalizer:
     """Normalize text for PageIndex - no page merging"""
     
     def __init__(self):
-        # Common header/footer patterns
         self.header_footer_patterns = [
             r'^Page \d+\s*$',  # "Page 12"
             r'^\d+\s*$',  # Just page number

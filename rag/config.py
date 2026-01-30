@@ -3,24 +3,23 @@ from pathlib import Path
 
 class Config:
     """RAG service configuration"""
-    
-    EMBEDDING_PROVIDER_TYPE = os.getenv("EMBEDDING_PROVIDER_TYPE", "http")
-    LLM_PROVIDER_TYPE = os.getenv("LLM_PROVIDER_TYPE", "http")
-    RERANKER_PROVIDER_TYPE = os.getenv("RERANKER_PROVIDER_TYPE", "http")
-    
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyB1rpq40ooQEWeQnihquZFbZg4NjJdf7vI")
+
     # Embedding
     EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
     EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "cpu")
-    EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "8"))  # Reduced for large files
-    EMBEDDING_PROGRESSIVE_BATCH = int(os.getenv("EMBEDDING_PROGRESSIVE_BATCH", "20"))  # Chunks to process before upsert
+    EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "8"))
+    EMBEDDING_PROGRESSIVE_BATCH = int(os.getenv("EMBEDDING_PROGRESSIVE_BATCH", "20"))
     EMBEDDING_MAX_PARALLEL = int(os.getenv("EMBEDDING_MAX_PARALLEL", "3"))
     
     # LLM
-    LLM_MODEL = os.getenv("LLM_MODEL", "Phi3:mini")
+    LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5:7b-instruct-q4_K_M")
     LLM_DEVICE = os.getenv("LLM_DEVICE", "cpu")
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))
     LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
     LLM_RELEVANCE_THRESHOLD = float(os.getenv("LLM_RELEVANCE_THRESHOLD", "0.4"))
+    LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434")
+    LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "150.0"))
     
     # Reranker
     RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
@@ -47,7 +46,7 @@ class Config:
     
     # Cache
     CACHE_EMBEDDINGS = os.getenv("CACHE_EMBEDDINGS", "true").lower() == "true"
-    CACHE_DIR = Path(os.getenv("CACHE_DIR", "/storage/cache"))
+    CACHE_DIR = Path(os.getenv("CACHE_DIR", "./storages/cache"))
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     
     # Embedding instructions
@@ -60,8 +59,11 @@ class Config:
         "" 
     )
     
-    STORAGE_DIR = Path(os.getenv("STORAGE_DIR", "/storage"))
+    STORAGE_DIR = Path(os.getenv("STORAGE_DIR", "./storages"))
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    
+    UPLOAD_DIR = STORAGE_DIR / "uploads"
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     
@@ -86,7 +88,9 @@ class Config:
     HTTP_MAX_KEEPALIVE_CONNECTIONS = int(os.getenv("HTTP_MAX_KEEPALIVE_CONNECTIONS", "20"))
     
     # Ingestion timeout (for large files)
-    INGEST_TIMEOUT = float(os.getenv("INGEST_TIMEOUT", "600.0"))  # 10 minutes for large files
+    INGEST_TIMEOUT = float(os.getenv("INGEST_TIMEOUT", "600.0"))
 
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyB1rpq40ooQEWeQnihquZFbZg4NjJdf7vI")
+    EMBEDDING_PROVIDER_TYPE = os.getenv("EMBEDDING_PROVIDER_TYPE", "http")
+    LLM_PROVIDER_TYPE = os.getenv("LLM_PROVIDER_TYPE", "http")
+    RERANKER_PROVIDER_TYPE = os.getenv("RERANKER_PROVIDER_TYPE", "http")
 config = Config()

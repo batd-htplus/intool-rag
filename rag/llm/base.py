@@ -15,7 +15,7 @@ class BaseLLM(ABC):
     """
     
     @abstractmethod
-    def generate(
+    async def generate(
         self,
         prompt: str,
         temperature: Optional[float] = None,
@@ -79,3 +79,5 @@ class BaseLLM(ABC):
             Dict with info
         """
         pass
+
+LLM = BaseLLM

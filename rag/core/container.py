@@ -69,7 +69,6 @@ class Container:
             LLMProvider instance
         
         Examples:
-            # Get LLM provider (configured in .env)
             provider = container.get_llm_provider()
         """
         provider_type = provider_type or "local"
@@ -80,8 +79,9 @@ class Container:
             return self._llm_provider
         
         if provider_type == "local":
-            from rag.providers.llm_provider import LocalLLMProvider
-            self._llm_provider = LocalLLMProvider()
+            from rag.providers.ollama.llm import OllamaLLMProvider
+            from rag.config import config
+            self._llm_provider = OllamaLLMProvider(model=config.LLM_MODEL)
         else:
             raise ValueError(f"Unknown LLM provider type: {provider_type}")
         

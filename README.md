@@ -71,3 +71,69 @@ Example: A 10-page PDF gets split into ~20-30 meaningful chunks, not arbitrary 5
 Extracts text from scanned PDFs and images automatically.
 Example: Upload a scanned invoice → OCR extracts text → chunks and indexes it → you can search and ask questions.
 
+### Struct
+
+```
+rag/
+├── ingest/                         # INGEST PIPELINE
+│   ├── semantic/
+│   │   ├── tree_builder.py         # build semantic tree
+│   │   └── __init__.py
+│   ├── ocr/
+│   ├── page_loader.py
+│   ├── page_normalizer.py
+│   ├── prompts.py
+│   ├── schemas.py
+│   └── __init__.py
+│
+├── query/                          # QUERY PIPELINE
+│   ├── retriever.py
+│   ├── reranker.py
+│   └── __init__.py
+│
+├── llm/                            # CAPABILITY LAYER
+│   ├── embeddings/
+│   │   ├── base.py                 # EmbeddingProvider ABC
+│   │   ├── factory.py              # chọn provider
+│   │   ├── service.py              # embed(), embed_batch()
+│   │   └── __init__.py
+│   │
+│   ├── semantic/
+│   │   ├── base.py                 # SemanticAnalyzer ABC
+│   │   ├── factory.py              # Gemini / Ollama
+│   │   ├── analyzer.py             # analyze_document()
+│   │   └── __init__.py
+│   │
+│   ├── llm_service.py              # text generation (chat / completion)
+│   ├── base.py                     # shared LLM abstractions
+│   └── __init__.py
+│
+├── providers/                      # IMPLEMENTATION LAYER
+│   ├── gemini/
+│   │   ├── embeddings.py
+│   │   ├── semantic.py
+│   │   ├── llm.py
+│   │   └── __init__.py
+│   │
+│   ├── ollama/
+│   │   ├── embeddings.py
+│   │   ├── semantic.py
+│   │   ├── llm.py
+│   │   └── __init__.py
+│   │
+│   ├── hf/
+│   │   ├── embeddings.py
+│   │   └── __init__.py
+│   │
+│   ├── base.py                     # Provider base classes
+│   └── __init__.py
+│
+├── core/                           # domain logic (optional)
+├── storage/                        # FAISS / persistence
+├── logging.py
+├── config.py
+├── main.py
+└── __init__.py
+
+
+```

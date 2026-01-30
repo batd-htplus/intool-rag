@@ -19,8 +19,12 @@ except ImportError:
 from rag.logging import logger
 
 
+
+from typing import Dict
+_INDEX_CACHE: Dict[str, "faiss.Index"] = {}
+
 class FAISSIndexReader:
-    """Read-only FAISS index wrapper"""
+    """Read-only FAISS index wrapper with Caching"""
     
     def __init__(self, index_path: str):
         """
@@ -32,15 +36,24 @@ class FAISSIndexReader:
         if not HAS_FAISS:
             raise RuntimeError("FAISS not installed: pip install faiss-cpu")
         
-        self.index_path = index_path
+        self.index_path = str(index_path)
         self.index = None
         
         self._load_index()
     
     def _load_index(self) -> None:
-        """Load FAISS index from file"""
+        """Load FAISS index from file (cached)"""
+        global _INDEX_CACHE
+        
+        if self.index_path in _INDEX_CACHE:
+            self.index = _INDEX_CACHE[self.index_path]
+            # logger.info(f"Using cached FAISS index: {self.index_path}") # verbose
+            return
+
         try:
             self.index = faiss.read_index(self.index_path)
+            _INDEX_CACHE[self.index_path] = self.index
+            
             logger.info(f"Loaded FAISS index: {self.index_path}")
             logger.info(f"  Dimension: {self.index.d}")
             logger.info(f"  Size: {self.index.ntotal} vectors")
@@ -184,3 +197,32 @@ async def search_faiss_by_vector(
     except Exception as e:
         logger.error(f"FAISS search failed: {e}")
         raise
+
+
+async def initialize_storage() -> None:
+    """
+    Pre-load all FAISS indices from storage directory into cache.
+    Called on application startup.
+    """
+    from rag.config import config
+    from pathlib import Path
+    
+    try:
+        storage_path = Path(config.STORAGE_DIR)
+        
+        if not storage_path.exists():
+            logger.warning(f"Storage directory not found: {storage_path}")
+            return
+            
+        count = 0
+        for index_file in storage_path.glob("*_faiss.index"):
+            try:
+                _ = FAISSIndexReader(str(index_file))
+                count += 1
+            except Exception as e:
+                logger.error(f"Failed to pre-load index {index_file}: {e}")
+                
+        logger.info(f"Initialized storage: Loaded {count} indices into cache")
+        
+    except Exception as e:
+        logger.error(f"Storage initialization failed: {e}")

@@ -21,3 +21,11 @@ app.include_router(
     prefix="",
     tags=["RAG"]
 )
+
+@app.on_event("startup")
+async def startup_event():
+    from rag.logging import logger
+    from rag.storage.faiss_index import initialize_storage
+    
+    logger.info("Starting up RAG Service...")
+    await initialize_storage()

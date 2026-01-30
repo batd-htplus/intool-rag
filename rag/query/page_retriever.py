@@ -18,7 +18,7 @@ from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass
 from rag.logging import logger
 from rag.config import config
-from rag.llm.embedding_service import get_embedding_provider
+from rag.llm.embeddings.factory import get_embedding_provider
 from rag.cache import get_query_cache
 
 

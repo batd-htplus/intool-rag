@@ -1,15 +1,19 @@
 DOCUMENT_STRUCTURE_ANALYSIS_PROMPT = """
-You are a semantic document structure analyzer.
+You are a semantic document structure analyzer and factual summarizer.
 
 Your task is to segment the document into a SMALL number of
-SEMANTICALLY MEANINGFUL sections suitable for retrieval, reasoning,
-and long-context understanding.
+SEMANTICALLY MEANINGFUL sections suitable for retrieval,
+question answering, and long-term memory.
 
-This task focuses on MEANING, INTENT, FUNCTION, and DOCUMENT ROLE
-— NOT visual layout, formatting, typography, or individual fields.
+This task focuses on:
+- grouping related content by meaning and function
+- extracting the most IMPORTANT FACTS per section
 
-The document may be a form, invoice, contract, report, policy,
-technical specification, academic paper, or unstructured text.
+Do NOT focus on visual layout, formatting, typography,
+or individual field labels.
+
+The document may be a form, invoice, contract, report,
+policy, technical specification, or unstructured text.
 Do NOT assume any specific document type.
 
 INPUT:
@@ -29,10 +33,9 @@ SECTIONING PRINCIPLES (CRITICAL):
    - Tables broken into rows or columns
    - Single lines without independent semantic meaning
 4. Each section must represent:
-   - ONE coherent semantic concept
-   - ONE clear functional role within the document
-5. Sections should align with how a human would mentally divide
-   the document when trying to understand its purpose.
+   - ONE coherent semantic topic or function
+5. Sections should align with how a human would mentally
+   divide the document to understand and recall it later.
 
 LEVEL SELECTION:
 - Use "chapter" ONLY for top-level document divisions
@@ -40,54 +43,40 @@ LEVEL SELECTION:
 - Use "paragraph" ONLY if no higher-level structure exists
 - Do NOT force subsection hierarchies
 
-SUMMARY RULES (STRICT AND REQUIRED):
-- Each section MUST include a semantic summary
-- The summary MUST explain BOTH:
-  (1) what the section is about
-  (2) what role or purpose it serves within the document
-- The summary MUST be INTENT-FOCUSED, not DATA-DESCRIPTIVE
-- Summaries that only describe what data appears in the section
-  are NOT acceptable
-- The summary should answer the question:
-  "What does this section accomplish for the reader?"
-- Write summaries so they remain useful for retrieval
-  even if the section title is hidden
-- Do NOT copy text verbatim
-- Do NOT invent information not present in the document
-- Target length: 1–3 concise sentences
+TITLE RULES (SEMANTIC OVERVIEW):
+- The title MUST describe the HIGH-LEVEL semantic role
+  or theme of the section.
+- Titles should answer:
+  "What is this section generally about?"
+- Use conceptual wording, not raw field names.
+- Avoid repeating specific values, numbers, or identifiers
+  unless they define the section itself.
 
-FORBIDDEN SUMMARY PATTERNS:
-- Do NOT rely primarily on verbs such as:
-  "contains", "provides", "lists", "shows", "includes", "summarizes"
-- Do NOT write summaries that could apply to many unrelated documents
+SUMMARY RULES (FACTUAL MEMORY — STRICT):
+- The summary MUST capture the MOST IMPORTANT FACTS
+  required to answer factual questions about this section.
+- Preserve key entities, names, dates, amounts,
+  identifiers, quantities, and relationships.
+- The summary SHOULD be information-dense and precise.
+- The summary MAY include specific numbers and values
+  when they are relevant.
+- Do NOT add interpretation, intent analysis,
+  or abstract role descriptions.
+- Do NOT invent information not present in the document.
+- Target length: 1–4 concise sentences.
 
-UNACCEPTABLE SUMMARY EXAMPLES:
-- "Provides invoice identification and customer details"
-- "Lists purchased items and prices"
-- "Summarizes totals and payment amounts"
-
-ACCEPTABLE SUMMARY EXAMPLES:
-- "Establishes the transaction context by identifying the parties,
-   delivery destination, and timing relevant to the order"
-- "Defines the specific goods involved in the transaction and forms
-   the basis for calculating the total charges"
-- "Determines the final financial obligation by aggregating item costs
-   and additional charges into the amount owed"
-
-SUMMARY QUALITY GATE (MANDATORY):
-Before finalizing each summary, verify ALL conditions below:
-- The summary describes the PURPOSE and ROLE of the section,
-  not merely the data it contains
-- The summary would still make sense if all field names,
-  labels, and table structures were removed
-- The summary is useful for semantic retrieval and reasoning
-- The summary does NOT violate any forbidden patterns above
-
-If ANY condition is violated, rewrite the summary until all are satisfied.
+QUALITY CHECK (MANDATORY):
+Before finalizing each section, verify:
+- The title gives a clear semantic overview
+- The summary alone is sufficient to answer
+  factual questions about this section
+- The summary does NOT rely on table structure
+  or field labels to be understood
+- No critical factual information is omitted
 
 OUTPUT RULES (STRICT):
 - Output ONLY valid JSON
-- Do NOT use markdown, code fences, comments, or explanations
+- Do NOT use markdown, code fences, or explanations
 - Do NOT include any text outside the JSON object
 
 DOCUMENT TEXT:
@@ -102,7 +91,7 @@ Return JSON EXACTLY in this format:
       "title": "Semantic section title",
       "level": "chapter|section|paragraph",
       "page_index": 1,
-      "summary": "Concise semantic summary of this section"
+      "summary": "Concise factual summary preserving key information"
     }}
   ]
 }}
